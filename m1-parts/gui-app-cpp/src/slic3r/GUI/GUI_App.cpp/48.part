@@ -1,0 +1,135 @@
+result;
+    if (status >= 400 && status < 500) {
+        try {
+        auto evt_str = evt.GetString();
+        if (!evt_str.empty()) {
+            json j = json::parse(evt_str.utf8_string());
+            if (j.contains("code")) {
+                if (!j["code"].is_null())
+                    code = j["code"].get<int>();
+            }
+            if (j.contains("error"))
+                if (!j["error"].is_null())
+                    error = j["error"].get<std::string>();
+        }
+        } catch (...) {}
+    }
+
+    // Version limit
+    if (code == HttpErrorVersionLimited) {
+        MessageDialog msg_dlg(nullptr, _L("The version of Snapmaker Orca is too low and needs to be updated to the latest version before it can be used normally"), "", wxAPPLY | wxOK);
+        if (msg_dlg.ShowModal() == wxOK) {
+        }
+
+    }
+
+    // request login
+    if (status == 401) {
+        if (m_agent) {
+            if (m_agent->is_user_login()) {
+                this->request_user_logout();
+
+                if (!m_show_http_errpr_msgdlg) {
+                    MessageDialog msg_dlg(nullptr, _L("Login information expired. Please login again."), "", wxAPPLY | wxOK);
+                    m_show_http_errpr_msgdlg = true;
+                    auto modal_result = msg_dlg.ShowModal();
+                    if (modal_result == wxOK || modal_result == wxCLOSE) {
+                        m_show_http_errpr_msgdlg = false;
+                        return;
+                    }
+                }
+            }
+        }
+        return;
+    }
+}
+
+void GUI_App::enable_user_preset_folder(bool enable)
+{
+    if (enable && m_orca_cloud && m_orca_cloud->is_user_login()) {
+        std::string user_id = m_orca_cloud->get_user_id();
+        app_config->set("preset_folder", user_id);
+        GUI::wxGetApp().preset_bundle->update_user_presets_directory(user_id);
+        BOOST_LOG_TRIVIAL(info) << "preset_folder: Orca Cloud user " << user_id;
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "preset_folder: set to empty";
+        app_config->set("preset_folder", "");
+        GUI::wxGetApp().preset_bundle->update_user_presets_directory(DEFAULT_USER_FOLDER_NAME);
+    }
+}
+
+void GUI_App::check_track_enable()
+{
+    // Orca: alaways disable track event
+    if (m_agent) {
+        m_agent->track_enable(false);
+        m_agent->track_remove_files();
+    }
+}
+
+
+bool GUI_App::is_studio_active()
+{
+    auto curr_time = std::chrono::system_clock::now();
+    auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(curr_time - last_active_point);
+    if (diff.count() < STUDIO_INACTIVE_TIMEOUT) {
+        return true;
+    }
+    return false;
+}
+
+void GUI_App::reset_to_active()
+{
+    last_active_point = std::chrono::system_clock::now();
+}
+
+//parse the string, if it doesn't contain a valid version string, return invalid version.
+Semver get_version(const std::string& str, const std::regex& regexp) {
+    std::smatch match;
+    if (std::regex_match(str, match, regexp)) {
+        std::string version_cleaned = match[0];
+        const boost::optional<Semver> version = Semver::parse(version_cleaned);
+        if (version.has_value()) {
+            return *version;
+        }
+    }
+    return Semver::invalid();
+}
+
+namespace
+{
+
+struct UpdaterQuery
+{
+    std::string iid;
+    std::string version;
+    std::string os;
+    std::string arch;
+    std::string os_info;
+};
+
+std::string detect_updater_os()
+{
+#if defined(_WIN32)
+    return "win";
+#elif defined(__APPLE__)
+    return "macos";
+#elif defined(__linux__) || defined(__LINUX__)
+    return "linux";
+#else
+    return "unknown";
+#endif
+}
+
+std::string detect_updater_arch()
+{
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+    return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "i386";
+#else
+    std::string arch = wxPlatformInfo::Get().GetArchName().ToStdString();
+    boost::algorithm::to_lower(arch);
+    if (arch.find("aarch64") != std::string::npos || arch.find("arm64") != std::strin
