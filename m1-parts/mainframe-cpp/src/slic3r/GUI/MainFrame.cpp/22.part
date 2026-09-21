@@ -1,0 +1,123 @@
+ne)
+        m_multi_machine->msw_rescale();
+    if(m_calibration)
+        m_calibration->msw_rescale();
+
+    // BBS
+#if 0
+    for (size_t id = 0; id < m_menubar->GetMenuCount(); id++)
+        msw_rescale_menu(m_menubar->GetMenu(id));
+#endif
+
+    // Workarounds for correct Window rendering after rescale
+
+    /* Even if Window is maximized during moving,
+     * first of all we should imitate Window resizing. So:
+     * 1. cancel maximization, if it was set
+     * 2. imitate resizing
+     * 3. set maximization, if it was set
+     */
+    const bool is_maximized = this->IsMaximized();
+    if (is_maximized)
+        this->Maximize(false);
+
+    /* To correct window rendering (especially redraw of a status bar)
+     * we should imitate window resizing.
+     */
+    const wxSize& sz = this->GetSize();
+    this->SetSize(sz.x + 1, sz.y + 1);
+    this->SetSize(sz);
+
+    this->Maximize(is_maximized);
+}
+
+void MainFrame::on_sys_color_changed()
+{
+    wxBusyCursor wait;
+
+    // update label colors in respect to the system mode
+    wxGetApp().init_label_colours();
+
+#ifndef __WINDOWS__
+    wxGetApp().force_colors_update();
+    wxGetApp().update_ui_from_settings();
+#endif //__APPLE__
+
+#ifdef __WXMSW__
+    wxGetApp().UpdateDarkUI(m_tabpanel);
+ //   m_statusbar->update_dark_ui();
+#ifdef _MSW_DARK_MODE
+    // update common mode sizer
+    if (!wxGetApp().tabs_as_menu())
+        dynamic_cast<Notebook*>(m_tabpanel)->Rescale();
+#endif
+#endif
+
+    // BBS
+    m_tabpanel->Rescale();
+    m_param_panel->msw_rescale();
+
+    // update Plater
+    wxGetApp().plater()->sys_color_changed();
+    if(m_monitor)
+        m_monitor->on_sys_color_changed();
+    if(m_calibration)
+        m_calibration->on_sys_color_changed();
+    // update Tabs
+    for (auto tab : wxGetApp().tabs_list)
+        tab->sys_color_changed();
+    for (auto tab : wxGetApp().model_tabs_list)
+        tab->sys_color_changed();
+    wxGetApp().plate_tab->sys_color_changed();
+
+    MenuFactory::sys_color_changed(m_menubar);
+
+    WebView::RecreateAll();
+
+    this->Refresh();
+}
+
+// On macOS, we use system menu bar, which handles the key accelerators automatically and breaks key handling in normal typing
+// See https://github.com/SoftFever/OrcaSlicer/issues/8152
+// So we disable some of the accelerators on macOS, by replacing the accelerator seperator to a hyphen.
+#ifdef __APPLE__
+static const wxString sep = " - ";
+#else
+static const wxString sep = "\t";
+#endif
+
+static wxMenu* generate_help_menu()
+{
+    wxMenu* helpMenu = new wxMenu();
+
+    // shortcut key
+    append_menu_item(helpMenu, wxID_ANY, _L("Keyboard Shortcuts") + sep + "&?", _L("Show the list of the keyboard shortcuts"),
+        [](wxCommandEvent&) { wxGetApp().keyboard_shortcuts(); });
+    // Show Beginner's Tutorial
+    append_menu_item(helpMenu, wxID_ANY, _L("Setup Wizard"), _L("Setup Wizard"), [](wxCommandEvent &) {wxGetApp().ShowUserGuide();});
+
+    helpMenu->AppendSeparator();
+    // Open Config Folder
+    append_menu_item(helpMenu, wxID_ANY, _L("Show Configuration Folder"), _L("Show Configuration Folder"),
+        [](wxCommandEvent&) { Slic3r::GUI::desktop_open_datadir_folder(); });
+    // Export Logs
+    append_menu_item(helpMenu, wxID_ANY, _L("Export Logs"), _L("Export application logs as ZIP file"),
+        [](wxCommandEvent&) { wxGetApp().mainframe->export_logs(); });
+
+    append_menu_item(helpMenu, wxID_ANY, _L("Show Tip of the Day"), _L("Show Tip of the Day"), [](wxCommandEvent&) {
+        wxGetApp().plater()->get_dailytips()->open();
+        GLCanvas3D* canvas = wxGetApp().plater()->get_current_canvas3D();
+        if (canvas)
+            canvas->set_as_dirty();
+        });
+
+    // Report a bug
+    //append_menu_item(helpMenu, wxID_ANY, _L("Report Bug(TODO)"), _L("Report a bug of Snapmaker Orca"),
+    //    [](wxCommandEvent&) {
+    //        //TODO
+    //    });
+    // Check New Version
+    append_menu_item(
+        helpMenu, wxID_ANY, _L("Check for Update"), _L("Check for Update"),
+        [](wxCommandEvent&) {
+            wxGetApp()
