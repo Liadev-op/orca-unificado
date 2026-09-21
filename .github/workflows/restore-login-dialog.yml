@@ -22,7 +22,7 @@ jobs:
       - name: Restore full cpp and fix include
         run: |
           set -euo pipefail
-          git show HEAD~1:src/slic3r/GUI/OrcaCloudLoginDialog.cpp > /tmp/orig.cpp
+          git show ec1c31cc62bbb6614afcd5f2fdccd29ac6b5299a:src/slic3r/GUI/OrcaCloudLoginDialog.cpp > /tmp/orig.cpp
           wc -c /tmp/orig.cpp
           python3 - <<'PY'
           from pathlib import Path
@@ -31,6 +31,8 @@ jobs:
           new = '#include "common_func/common_func.hpp"'
           if old not in t:
               raise SystemExit('expected include missing in parent blob')
+          if len(t.encode()) < 10000:
+              raise SystemExit('parent blob too small')
           t = t.replace(old, new, 1)
           Path('src/slic3r/GUI/OrcaCloudLoginDialog.cpp').write_text(t)
           print('wrote', len(t.encode()), 'bytes')
