@@ -1,0 +1,79 @@
+file") + dots + "\t" + ctrl + "G", _L("Export current sliced file"),
+            [this](wxCommandEvent&) { if (m_plater) wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_EXPORT_SLICED_FILE)); }, "menu_export_sliced_file", nullptr,
+            [this](){return can_export_gcode(); }, this);
+
+        append_menu_item(export_menu, wxID_ANY, _L("Export all plate sliced file") + dots/* + "\t" + ctrl + "G"*/, _L("Export all plate sliced file"),
+            [this](wxCommandEvent&) { if (m_plater) wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_EXPORT_ALL_SLICED_FILE)); }, "menu_export_sliced_file", nullptr,
+            [this]() {return can_export_all_gcode(); }, this);
+
+        append_menu_item(export_menu, wxID_ANY, _L("Export G-code") + dots/* + "\t" + ctrl + "G"*/, _L("Export current plate as G-code"),
+            [this](wxCommandEvent&) { if (m_plater) m_plater->export_gcode(false); }, "menu_export_gcode", nullptr,
+            [this]() {return can_export_gcode(); }, this);
+        append_menu_item(
+            export_menu, wxID_ANY, _L("Export Preset Bundle") + dots /* + "\t" + ctrl + "E"*/, _L("Export current configuration to files"),
+            [this](wxCommandEvent &) { export_config(); },
+            "menu_export_config", nullptr,
+            []() { return true; }, this);
+
+        append_submenu(fileMenu, export_menu, wxID_ANY, _L("Export"), "");
+
+        fileMenu->AppendSeparator();
+        append_menu_item(fileMenu, wxID_ANY, _L("Orca Cloud..."),
+            _L("Log in or out of Orca Cloud (cloud.orcaslicer.com). This is not the Snapmaker account."),
+            [this](wxCommandEvent&) { wxGetApp().request_orca_cloud_login(); }, "", nullptr,
+            []() { return true; }, this);
+        append_menu_item(fileMenu, wxID_ANY, _L("Sync Presets"),
+            _L("Pull and apply the latest presets from Orca Cloud"),
+            [this](wxCommandEvent&) {
+                if (!wxGetApp().is_orca_cloud_login()) {
+                    MessageDialog info_dlg(this, _L("You must be logged in to Orca Cloud to sync presets."),
+                        _L("Sync Presets"), wxOK | wxICON_INFORMATION);
+                    info_dlg.ShowModal();
+                    return;
+                }
+                wxGetApp().restart_sync_user_preset();
+            }, "", nullptr,
+            []() {
+                return wxGetApp().is_orca_cloud_login() && !wxGetApp().app_config->get_stealth_mode();
+            }, this);
+
+        fileMenu->AppendSeparator();
+
+#ifndef __APPLE__
+        append_menu_item(fileMenu, wxID_EXIT, _L("Quit"), wxString::Format(_L("Quit")),
+            [this](wxCommandEvent&) { Close(false); }, "menu_exit", nullptr);
+#else
+        append_menu_item(fileMenu, wxID_EXIT, _L("Quit"), wxString::Format(_L("Quit")),
+            [this](wxCommandEvent&) { Close(false); }, "", nullptr);
+#endif
+    }
+
+    // Edit menu
+    wxMenu* editMenu = nullptr;
+    if (m_plater != nullptr)
+    {
+        editMenu = new wxMenu();
+
+    auto handle_key_event = [](wxKeyEvent& evt) {
+        if (wxGetApp().imgui()->update_key_data(evt)) {
+            GLCanvas3D* canvas = wxGetApp().plater()->get_current_canvas3D();
+            if (canvas) {
+                canvas->render();
+                return true;
+            }
+        }
+        return false;
+    };
+#ifndef __APPLE__
+        // BBS undo
+        append_menu_item(editMenu, wxID_ANY, _L("Undo") + "\t" + ctrl + "Z",
+            _L("Undo"), [this](wxCommandEvent&) { m_plater->undo(); },
+            "menu_undo", nullptr, [this](){return m_plater->can_undo(); }, this);
+        // BBS redo
+        append_menu_item(editMenu, wxID_ANY, _L("Redo") + "\t" + ctrl + "Y",
+            _L("Redo"), [this](wxCommandEvent&) { m_plater->redo(); },
+            "menu_redo", nullptr, [this](){return m_plater->can_redo(); }, this);
+        editMenu->AppendSeparator();
+        // BBS Cut TODO
+        append_menu_item(editMenu, wxID_ANY, _L("Cut") + "\t" + ctrl + "X",
+            _L("Cut selection to clipboard"), [this](wxCommandE
