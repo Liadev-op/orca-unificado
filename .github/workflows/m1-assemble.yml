@@ -1,0 +1,66 @@
+name: m1-assemble
+on:
+  push:
+    branches: [cursor/m1-orca-cloud-a90c]
+    paths:
+      - 'm1-parts/**'
+  workflow_dispatch:
+concurrency:
+  group: m1-assemble
+  cancel-in-progress: false
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m1-orca-cloud-a90c
+          fetch-depth: 0
+      - name: Assemble ready M1 part batches
+        run: |
+          python3 << 'PY'
+          import base64, pathlib, subprocess, sys, zlib
+          root = pathlib.Path('m1-parts')
+          if not root.exists():
+              print('no m1-parts')
+              sys.exit(0)
+          batches = sorted(p for p in root.iterdir() if p.is_dir())
+          assembled = 0
+          for batch in batches:
+              ready = batch / 'READY'
+              if not ready.exists():
+                  print('skip incomplete', batch)
+                  continue
+              msg_file = batch / 'message.txt'
+              msg = msg_file.read_text(encoding='utf-8').strip() if msg_file.exists() else f'M1: assemble {batch.name}'
+              wrote = []
+              for pdir in sorted({p.parent for p in batch.rglob('*.z64')}):
+                  rel = pdir.relative_to(batch).as_posix()
+                  chunks = sorted(pdir.glob('*.z64'))
+                  zdata = b''.join(base64.b64decode(c.read_bytes()) for c in chunks)
+                  data = zlib.decompress(zdata)
+                  out = pathlib.Path(rel)
+                  out.parent.mkdir(parents=True, exist_ok=True)
+                  out.write_bytes(data)
+                  wrote.append((rel, len(data)))
+                  print('wrote', rel, len(data))
+              if not wrote:
+                  continue
+              subprocess.check_call(['git', 'add', '--'] + [w[0] for w in wrote])
+              subprocess.check_call(['git', 'rm', '-r', '-f', str(batch)])
+              subprocess.check_call(['git', 'config', 'user.name', 'Liadev'])
+              subprocess.check_call(['git', 'config', 'user.email', '122531419+Liadev-op@users.noreply.github.com'])
+              st = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
+              if not st.stdout.strip():
+                  print('nothing to commit for', batch)
+                  continue
+              subprocess.check_call(['git', 'commit', '-m', msg])
+              assembled += 1
+          if assembled:
+              subprocess.check_call(['git', 'push', 'origin', 'HEAD:cursor/m1-orca-cloud-a90c'])
+              print('pushed', assembled, 'batch commit(s)')
+          else:
+              print('no ready batches')
+          PY
