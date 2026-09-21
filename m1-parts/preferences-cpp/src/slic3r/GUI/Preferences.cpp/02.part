@@ -1,0 +1,85 @@
+_ITALIAN)) {
+            language_name = wxString::FromUTF8("\x69\x74\x61\x6c\x69\x61\x6e\x6f");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_KOREAN)) {
+            language_name = wxString::FromUTF8("\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_RUSSIAN)) {
+            language_name = wxString::FromUTF8("\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_UKRAINIAN)) {
+            language_name = wxString::FromUTF8("Ukrainian");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_TURKISH)) {
+            language_name = wxString::FromUTF8("Turkish");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_POLISH)) {
+            language_name = wxString::FromUTF8("Polski");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_CATALAN)) {
+            language_name = wxString::FromUTF8("Catalan");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_PORTUGUESE_BRAZILIAN)) {
+            language_name = wxString::FromUTF8("Português (Brasil)");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_LITHUANIAN)) {
+            language_name = wxString::FromUTF8("Lietuvių");
+        }
+
+        if (app_config->get(param) == vlist[i]->CanonicalName) {
+            m_current_language_selected = i;
+        }
+        combobox->Append(language_name);
+    }
+    if (m_current_language_selected == -1 && language.size() >= 5) {
+        language = language.substr(0, 2);
+        for (size_t i = 0; i < vlist.size(); ++i) {
+            if (vlist[i]->CanonicalName.StartsWith(language)) {
+                m_current_language_selected = i;
+                break;
+            }
+        }
+    }
+    combobox->SetSelection(m_current_language_selected);
+
+    m_sizer_combox->Add(combobox, 0, wxALIGN_CENTER, 0);
+
+    combobox->Bind(wxEVT_LEFT_DOWN, [this, combobox](wxMouseEvent &e) {
+        m_current_language_selected = combobox->GetSelection();
+        e.Skip();
+    });
+
+    combobox->Bind(wxEVT_COMBOBOX, [this, param, vlist, combobox](wxCommandEvent &e) {
+        if (combobox->GetSelection() == m_current_language_selected)
+            return;
+
+        if (e.GetString().mb_str() != app_config->get(param)) {
+            {
+                //check if the project has changed
+                if (wxGetApp().plater()->is_project_dirty()) {
+                    auto result = MessageDialog(static_cast<wxWindow*>(this), _L("The current project has unsaved changes, save it before continue?"),
+                        wxString(SLIC3R_APP_FULL_NAME) + " - " + _L("Save"), wxYES_NO | wxCANCEL | wxYES_DEFAULT | wxCENTRE).ShowModal();
+
+                    if (result == wxID_YES) {
+                        wxGetApp().plater()->save_project();
+                    }
+                }
+
+
+                // the dialog needs to be destroyed before the call to switch_language()
+                // or sometimes the application crashes into wxDialogBase() destructor
+                // so we put it into an inner scope
+                MessageDialog msg_wingow(nullptr, _L("Switching the language requires application restart.\n") + "\n" + _L("Do you want to continue?"),
+                                         L("Language selection"), wxICON_QUESTION | wxOK | wxCANCEL);
+                if (msg_wingow.ShowModal() == wxID_CANCEL) {
+                    combobox->SetSelection(m_current_language_selected);
+                    return;
+                }
+            }
+
+            auto check = [this](bool yes_or_no) {
+                // if (yes_or_no)
+                //    return true;
+                int act_btns = ActionButtons::SAVE;
+                return wxGetApp().check_and_keep_current_preset_changes(_L("Switching application language"),
+                                                                  
