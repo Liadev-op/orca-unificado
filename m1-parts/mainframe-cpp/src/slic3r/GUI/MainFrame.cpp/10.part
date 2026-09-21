@@ -1,0 +1,114 @@
+use3d_controller().shutdown();
+        // Store the device parameter database back to appconfig.
+        m_plater->get_mouse3d_controller().save_config(*wxGetApp().app_config);
+    }
+
+    // stop agent
+    NetworkAgent* agent = wxGetApp().getAgent();
+    if (agent)
+        agent->track_enable(false);
+
+    // Stop the background thread of the removable drive manager, so that no new updates will be sent to the Plater.
+    //wxGetApp().removable_drive_manager()->shutdown();
+@@TAB@@//stop listening for messages from other instances
+@@TAB@@wxGetApp().other_instance_message_handler()->shutdown(this);
+    // Save the slic3r.ini.Usually the ini file is saved from "on idle" callback,
+    // but in rare cases it may not have been called yet.
+    if(wxGetApp().app_config->dirty())
+        wxGetApp().app_config->save();
+//         if (m_plater)
+//             m_plater->print = undef;
+//         Slic3r::GUI::deregister_on_request_update_callback();
+
+    // set to null tabs and a plater
+    // to avoid any manipulations with them from App->wxEVT_IDLE after of the mainframe closing
+    wxGetApp().tabs_list.clear();
+    wxGetApp().model_tabs_list.clear();
+    wxGetApp().shutdown(isRecreate);
+    // BBS: why clear ?
+    //wxGetApp().plater_ = nullptr;
+
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "MainFrame::shutdown exit";
+}
+
+void MainFrame::update_filament_tab_ui()
+{
+    wxGetApp().get_tab(Preset::Type::TYPE_FILAMENT)->reload_config();
+    wxGetApp().get_tab(Preset::Type::TYPE_FILAMENT)->update_dirty();
+    wxGetApp().get_tab(Preset::Type::TYPE_FILAMENT)->update_tab_ui();
+}
+
+void MainFrame::update_title()
+{
+    return;
+}
+
+void MainFrame::show_publish_button(bool show)
+{
+    // m_publish_btn->Show(show);
+    // Layout();
+}
+
+void MainFrame::update_title_colour_after_set_title()
+{
+#ifdef __APPLE__
+    set_title_colour_after_set_title(GetHandle());
+#endif
+}
+
+void MainFrame::show_option(bool show)
+{
+    if (!show) {
+        if (m_slice_btn->IsShown()) {
+            m_slice_btn->Hide();
+            m_print_btn->Hide();
+            m_slice_option_btn->Hide();
+            m_print_option_btn->Hide();
+            Layout();
+        }
+    } else {
+        if (!m_slice_btn->IsShown()) {
+            m_slice_btn->Show();
+            m_print_btn->Show();
+            m_slice_option_btn->Show();
+            m_print_option_btn->Show();
+            Layout();
+        }
+    }
+}
+
+void MainFrame::init_tabpanel() {
+    // wxNB_NOPAGETHEME: Disable Windows Vista theme for the Notebook background. The theme performance is terrible on
+    // Windows 10 with multiple high resolution displays connected.
+    // BBS
+    wxBoxSizer *side_tools = create_side_tools();
+    m_tabpanel = new Notebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, side_tools,
+                              wxNB_TOP | wxTAB_TRAVERSAL | wxNB_NOPAGETHEME);
+    m_tabpanel->SetBackgroundColour(*wxWHITE);
+
+#ifndef __WXOSX__ // Don't call SetFont under OSX to avoid name cutting in ObjectList
+    m_tabpanel->SetFont(Slic3r::GUI::wxGetApp().normal_font());
+#endif
+    m_tabpanel->Hide();
+    m_settings_dialog.set_tabpanel(m_tabpanel);
+
+#ifdef __WXMSW__
+    m_tabpanel->Bind(wxEVT_BOOKCTRL_PAGE_CHANGED, [this](wxBookCtrlEvent& e) {
+#else
+    m_tabpanel->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& e) {
+#endif
+        //BBS
+        wxWindow* panel = m_tabpanel->GetCurrentPage();
+        int sel = m_tabpanel->GetSelection();
+        //wxString page_text = m_tabpanel->GetPageText(sel);
+        m_last_selected_tab = m_tabpanel->GetSelection();
+        if (panel == m_plater) {
+            if (sel == tp3DEditor) {
+                if (!m_plater || !m_plater->is_view3D_shown())
+                    wxPostEvent(m_plater, SimpleEvent(EVT_GLVIEWTOOLBAR_3D));
+                m_param_panel->OnActivate();
+            }
+            else if (sel == tpPreview) {
+                if (!m_plater || m_plater->is_view3D_shown())
+                    wxPostEvent(m_plater, SimpleEvent(EVT_GLVIEWTOOLBAR_PREVIEW));
+    
