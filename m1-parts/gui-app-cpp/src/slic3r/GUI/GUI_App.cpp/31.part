@@ -1,0 +1,81 @@
+std::to_string(get_current_pid());
+    if (app_config) {
+        snap_cfg.region = app_config->get_country_code();
+    }
+    snap_cfg.home_for_redact = data_dir();
+
+    snap::SnapLogClient::instance().init(std::move(deps), std::move(snap_cfg));
+    BOOST_LOG_TRIVIAL(info) << "SnapLogClient initialized";
+
+    profiler.mark("on_init_inner return");
+
+    return true;
+}
+
+void GUI_App::machine_find()
+{
+    std::vector<std::string> mdns_service_names;
+
+    mdns_service_names.push_back("snapmaker");
+
+    Bonjour::TxtKeys txt_keys   = {"sn", "version", "machine_type"};
+    std::string      unique_key = "sn";
+
+    m_machine_find_engine = Bonjour("snapmaker")
+                                .set_txt_keys(std::move(txt_keys))
+                                .set_retries(3)
+                                .set_timeout(10)
+                                .on_reply([this](BonjourReply&& reply) {
+                                    if (!GUI_App::m_app_alive.load())
+                                        return;
+                                    std::string hostname = reply.hostname;
+                                    size_t      pos      = hostname.find(".local");
+                                    if (pos != std::string::npos) {
+                                        hostname = hostname.substr(0, pos);
+                                    }
+                                    std::string ip = reply.ip.to_string();
+
+                                    if (reply.txt_data.count("sn")) {
+                                        std::string sn = reply.txt_data["sn"];
+                                        DeviceInfo  info;
+                                        if (app_config->get_device_info(sn, info)) {
+                                            if (info.ip != ip && info.link_mode != "wan") {
+                                                info.ip = ip;
+                                                app_config->save_device_info(info);
+
+                                                this->CallAfter([this]() {
+                                                    auto devices = app_config->get_devices();
+                                                    json param;
+                                                    param["command"]       = "local_devices_arrived";
+                                                    param["sequece_id"]    = "10001";
+                                                    param["data"]          = devices;
+                                                    std::string logout_cmd = param.dump();
+                                                    wxString    strJS      = wxString::Format("window.postMessage(%s)", logout_cmd);
+                                                    GUI::wxGetApp().run_script(strJS);
+
+                                                    // wcp订阅
+                                                    json data = this->app_config->get_devices();
+                                                    wxGetApp().device_card_notify(data);
+
+                                                });
+                                            }
+                                        }
+                                    }
+                                })
+                                .on_complete([this]() {
+                                    if (!GUI_App::m_app_alive.load())
+                                        return;
+                                    reset_machine_find_engine();
+                                })
+                                .lookup();
+}
+
+void GUI_App::copy_network_if_available()
+{
+    if (app_config->get("update_network_plugin") != "true")
+        return;
+    std::string network_library, player_library, live555_library, network_library_dst, player_library_dst, live555_library_dst;
+    std::string data_dir_str = data_dir();
+    boost::filesystem::path data_dir_path(data_dir_str);
+    auto plugin_folder = data_dir_path / "plugins";
+    auto cache_folder = data_dir_pa
