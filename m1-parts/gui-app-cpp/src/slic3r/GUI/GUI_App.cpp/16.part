@@ -1,0 +1,81 @@
+           dest_file = dest_file_path.filename().string();
+                auto dest_path = boost::filesystem::path(plugin_folder.string() + "/" + dest_file);
+                std::string dest_zip_file = encode_path(dest_path.string().c_str());
+                try {
+                    if (fs::exists(dest_path))
+                        fs::remove(dest_path);
+                    mz_bool res = mz_zip_reader_extract_to_file(&archive, stat.m_file_index, dest_zip_file.c_str(), 0);
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", extract  %1% from plugin zip %2%\n") % dest_file % stat.m_filename;
+                    if (res == 0) {
+#ifdef WIN32
+                        std::wstring new_dest_zip_file = boost::locale::conv::utf_to_utf<wchar_t>(dest_path.generic_string());
+                        res                            = mz_zip_reader_extract_to_file_w(&archive, stat.m_file_index, new_dest_zip_file.c_str(), 0);
+#endif
+                        if (res == 0) {
+                            mz_zip_error zip_error = mz_zip_get_last_error(&archive);
+                            BOOST_LOG_TRIVIAL(error) << "[install_plugin]Archive read error:" << mz_zip_get_error_string(zip_error) << std::endl;
+                            close_zip_reader(&archive);
+                            if (pro_fn) { pro_fn(InstallStatusUnzipFailed, 0, cancel); }
+                            return InstallStatusUnzipFailed;
+                        }
+                    }
+                    else {
+                        if (pro_fn) {
+                            pro_fn(InstallStatusNormal, 50 + i/num_entries, cancel);
+                        }
+                        try {
+                            auto backup_path = boost::filesystem::path(backup_folder.string() + "/" + dest_file);
+                            if (fs::exists(backup_path))
+                                fs::remove(backup_path);
+                            std::string error_message;
+                            CopyFileResult cfr = copy_file(dest_path.string(), backup_path.string(), error_message, false);
+                            if (cfr != CopyFileResult::SUCCESS) {
+                                BOOST_LOG_TRIVIAL(error) << "Copying to backup failed(" << cfr << "): " << error_message;
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            BOOST_LOG_TRIVIAL(error) << "Copying to backup failed: " << e.what();
+                            //continue
+                        }
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    // ensure the zip archive is closed and rethrow the exception
+                    close_zip_reader(&archive);
+                    BOOST_LOG_TRIVIAL(error) << "[install_plugin]Archive read exception:"<<e.what();
+                    if (pro_fn) {
+                        pro_fn(InstallStatusUnzipFailed, 0, cancel);
+                    }
+                    return InstallStatusUnzipFailed;
+                }
+            }
+        }
+        else {
+            BOOST_LOG_TRIVIAL(error) << boost::format("[install_plugin]: %1%, mz_zip_reader_file_stat for file %2% failed")%__LINE__%i;
+        }
+    }
+
+    close_zip_reader(&archive);
+
+    if (pro_fn)
+        pro_fn(InstallStatusInstallCompleted, 100, cancel);
+    if (name == "plugins")
+        app_config->set_bool("installed_networking", true);
+    BOOST_LOG_TRIVIAL(info) << "[install_plugin] success";
+    return 0;
+}
+
+void GUI_App::restart_networking()
+{
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< boost::format(" enter, mainframe %1%")%mainframe;
+    on_init_network(true);
+    if(m_agent) {
+        init_networking_callbacks();
+        m_agent->set_on_ssdp_msg_fn(
+            [this](std::string json_str) {
+                if (m_is_closing) {
+                    return;
+                }
+                GUI::wxGetApp().CallAf
