@@ -1,0 +1,146 @@
+/*unsigned*/int display_idx = wxDisplay::GetFromWindow(window);
+    wxRect display;
+    if (display_idx == wxNOT_FOUND) {
+        display = wxDisplay(0u).GetClientArea();
+        window->Move(display.GetTopLeft());
+    } else {
+        display = wxDisplay(display_idx).GetClientArea();
+    }
+
+    auto metrics = WindowMetrics::from_window(window);
+    metrics.sanitize_for_display(display);
+    if (window->GetScreenRect() != metrics.get_rect()) {
+        window->SetSize(metrics.get_rect());
+    }
+}
+
+void GUI_App::window_pos_center(wxTopLevelWindow *window)
+{
+    /*unsigned*/int display_idx = wxDisplay::GetFromWindow(window);
+    wxRect display;
+    if (display_idx == wxNOT_FOUND) {
+        display = wxDisplay(0u).GetClientArea();
+        window->Move(display.GetTopLeft());
+    } else {
+        display = wxDisplay(display_idx).GetClientArea();
+    }
+
+    auto metrics = WindowMetrics::from_window(window);
+    metrics.center_for_display(display);
+    if (window->GetScreenRect() != metrics.get_rect()) {
+        window->SetSize(metrics.get_rect());
+    }
+}
+
+void GUI_App::recent_file_notify(const json& res)
+{
+    for (const auto& instance : m_recent_file_subscribers) {
+        auto ptr = instance.second.lock();
+        if (ptr) {
+            ptr->m_res_data = res;
+            ptr->send_to_js();
+        }
+    }
+}
+
+void GUI_App::device_card_notify(const json& res)
+{
+    for (const auto& instance : m_device_card_subscribers) {
+        auto ptr = instance.second.lock();
+        if (ptr) {
+            ptr->m_res_data = res;
+            ptr->send_to_js();
+        }
+    }
+}
+
+void GUI_App::page_state_notify_webview(wxWebView* webview, const std::string& state)
+{
+    if (!webview) return;
+
+    json notification_data;
+    notification_data["state"] = state;
+
+    for (const auto& instance : m_page_state_subscribers) {
+        if (instance.first == webview) {
+            auto ptr = instance.second.lock();
+            if (ptr) {
+                ptr->m_res_data = notification_data;
+                ptr->send_to_js();
+            }
+        }
+    }
+}
+
+void GUI_App::notify_foreground_change(const bool active)
+{
+    if (active)
+        sm_maybe_refresh_login_token();
+
+    json data;
+    data["state"] = active;
+
+    for (const auto& instance : m_foreground_change_subscribers) {
+        auto ptr = instance.second.lock();
+        if (ptr) {
+            ptr->m_res_data = data;
+            ptr->send_to_js();
+        }
+    }
+}
+
+void GUI_App::cache_notify(const std::string& key, const json& res)
+{
+    for (const auto& instance : m_cache_subscribers) {
+        auto ptr = instance.first.second.lock();
+        if (ptr) {
+            std::string cache_key = instance.second;
+            if (cache_key == key) {
+                json object = json::object();
+                object[key] = res;
+
+                ptr->m_res_data = object;
+                ptr->send_to_js();
+            }
+        }
+    }
+}
+
+void GUI_App::user_update_privacy_notify(const bool& res)
+{
+    set_privacy_policy(res);
+    ::Slic3r::SnapLog::v1::SnapLogClient::instance().set_consent(res);
+
+    json data;
+
+    data[PRIVACY_POLICY_FLAGS] = res;
+
+    for (const auto& instance : m_user_update_privacy_subscribers) {
+        auto ptr = instance.second.lock();
+        if (ptr) {
+            ptr->m_res_data = data;
+            ptr->send_to_js();
+        }
+    }
+
+}
+
+void GUI_App::user_login_notify(const json& res)
+{
+    for (const auto& instance : m_user_login_subscribers) {
+        auto ptr = instance.second.lock();
+        if (ptr) {
+            ptr->m_res_data = res;
+            ptr->send_to_js();
+        }
+    }
+}
+
+bool GUI_App::config_wizard_startup()
+{
+    auto isAgree = wxGetApp().app_config->get("app", PRIVACY_POLICY_FLAGS);
+    user_update_privacy_notify(isAgree == "true");
+    BOOST_LOG_TRIVIAL(warning) << "config_wizard_startup changed the privacy policy with: " << (isAgree);
+    
+        if (!m_app_conf_exists || preset_bundle->printers.only_default_printers()) {
+            BOOST_LOG_TRIVIAL(inf
