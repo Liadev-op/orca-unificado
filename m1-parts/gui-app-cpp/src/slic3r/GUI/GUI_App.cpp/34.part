@@ -1,0 +1,113 @@
+f (m_agent) {
+            init_networking_callbacks();
+            std::string country_code = app_config->get_country_code();
+            m_agent->set_country_code(country_code);
+            m_agent->start();
+            profiler.mark("m_agent->start");
+        }
+    }
+    else {
+        int result = Slic3r::NetworkAgent::unload_network_module();
+        BOOST_LOG_TRIVIAL(info) << "on_init_network, unload_network_module, result = " << result;
+
+        if (!m_device_manager)
+            m_device_manager = new Slic3r::DeviceManager();
+
+        if (!m_user_manager)
+            m_user_manager = new Slic3r::UserManager();
+    }
+
+    profiler.note(std::string("create_network_agent=") + (create_network_agent ? "true" : "false"));
+
+    init_orca_cloud_agent();
+
+    return true;
+}
+
+unsigned GUI_App::get_colour_approx_luma(const wxColour &colour)
+{
+    double r = colour.Red();
+    double g = colour.Green();
+    double b = colour.Blue();
+
+    return std::round(std::sqrt(
+        r * r * .241 +
+        g * g * .691 +
+        b * b * .068
+        ));
+}
+
+bool GUI_App::dark_mode()
+{
+#ifdef SUPPORT_DARK_MODE
+#if __APPLE__
+    // The check for dark mode returns false positive on 10.12 and 10.13,
+    // which allowed setting dark menu bar and dock area, which is
+    // is detected as dark mode. We must run on at least 10.14 where the
+    // proper dark mode was first introduced.
+    return wxPlatformInfo::Get().CheckOSVersion(10, 14) && mac_dark_mode();
+#else
+    return wxGetApp().app_config->get("dark_color_mode") == "1" ? true : check_dark_mode();
+    //const unsigned luma = get_colour_approx_luma(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+    //return luma < 128;
+#endif
+#else
+    //BBS disable DarkUI mode
+    return false;
+#endif
+}
+
+const wxColour GUI_App::get_label_default_clr_system()
+{
+    return dark_mode() ? wxColour(115, 220, 103) : wxColour(26, 132, 57);
+}
+
+const wxColour GUI_App::get_label_default_clr_modified()
+{
+    return dark_mode() ? wxColour(253, 111, 40) : wxColour(252, 77, 1);
+}
+
+void GUI_App::init_label_colours()
+{
+    bool is_dark_mode = dark_mode();
+    m_color_label_modified = is_dark_mode ? wxColour("#F1754E") : wxColour("#F1754E");
+    m_color_label_sys      = is_dark_mode ? wxColour("#B2B3B5") : wxColour("#363636");
+
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+    m_color_label_default           = is_dark_mode ? wxColour(250, 250, 250) : m_color_label_sys; // wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+    m_color_highlight_label_default = is_dark_mode ? wxColour(230, 230, 230): wxSystemSettings::GetColour(/*wxSYS_COLOUR_HIGHLIGHTTEXT*/wxSYS_COLOUR_WINDOWTEXT);
+    m_color_highlight_default       = is_dark_mode ? wxColour("#36363B") : wxColour("#F1F1F1"); // ORCA row highlighting
+    m_color_hovered_btn_label       = is_dark_mode ? wxColour(255, 255, 254) : wxColour(0,0,0);
+    m_color_default_btn_label       = is_dark_mode ? wxColour(255, 255, 254): wxColour(0,0,0);
+    m_color_selected_btn_bg         = is_dark_mode ? wxColour(84, 84, 91)   : wxColour(206, 206, 206);
+#else
+    m_color_label_default = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+#endif
+    m_color_window_default          = is_dark_mode ? wxColour(43, 43, 43)   : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+    StateColor::SetDarkMode(is_dark_mode);
+}
+
+void GUI_App::update_label_colours_from_appconfig()
+{
+    if (app_config->has("label_clr_sys")) {
+        auto str = app_config->get("label_clr_sys");
+        if (str != "")
+            m_color_label_sys = wxColour(str);
+    }
+
+    if (app_config->has("label_clr_modified")) {
+        auto str = app_config->get("label_clr_modified");
+        if (str != "")
+            m_color_label_modified = wxColour(str);
+    }
+}
+
+void GUI_App::update_publish_status()
+{
+    // mainframe->show_publish_button(has_model_mall());
+    // if (app_config->get("staff_pick_switch") == "true") {
+    //     mainframe->m_webview->SendDesignStaffpick(has_model_mall());
+    // }
+}
+
+b
