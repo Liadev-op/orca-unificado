@@ -1,0 +1,72 @@
+// System preset is read-only.
+    bool                is_system   = false;
+    // Preset is visible, if it is associated with a printer model / variant that is enabled in the AppConfig
+    // or if it has no printer model / variant association.
+    // Also the "default" preset is only visible, if it is the only preset in the list.
+    bool                is_visible  = true;
+    // Has this preset been modified?
+    bool                is_dirty    = false;
+    // Is this preset compatible with the currently active printer?
+    bool                is_compatible = true;
+
+    //BBS: add type for project-embedded
+    bool                is_project_embedded = false;
+    ConfigSubstitutions *loading_substitutions{nullptr};
+    bool                is_user() const { return ! this->is_default && ! this->is_system && ! this->is_project_embedded; }
+    //bool                is_user() const { return ! this->is_default && ! this->is_system; }
+
+    // Name of the preset, usually derived form the file name.
+    std::string         name;
+    // File name of the preset. This could be a Print / Filament / Printer preset,
+    // or a Configuration file bundling the Print + Filament + Printer presets (in that case is_external and possibly is_system will be true),
+    // or it could be a G-code (again, is_external will be true).
+    std::string         file;
+    // If this is a system profile, then there should be a vendor data available to display at the UI.
+    const VendorProfile *vendor      = nullptr;
+
+    // Has this profile been loaded?
+    bool                loaded      = false;
+
+    // Configuration data, loaded from a file, or set from the defaults.
+    DynamicPrintConfig  config;
+
+    // Alias of the preset
+    std::string         alias;
+    // List of profile names, from which this profile was renamed at some point of time.
+    // This list is then used to match profiles by their names when loaded from .gcode, .3mf, .amf,
+    // and to match the "inherits" field of user profiles with updated system profiles.
+    std::vector<std::string> renamed_from;
+
+    // Orca: maintain a list of printer models that are excluded from this preset, designed for filaments without compatible_printer defined
+    // (hence they are visible to all printer models by default) in Orca Filament Library. However, we might have speciliazed filament for
+    // certain printer models defined in the vendor profile as well, in this case we want to hide this generic preset for these printer models.
+    std::set<std::string> m_excluded_from;
+
+    // Orca: flag to indicate if this preset is from Orca Filament Library
+    bool m_from_orca_filament_lib = false;
+
+    //BBS
+    Semver              version;         // version of preset
+    std::string         ini_str;         // ini string of preset
+    std::string         setting_id;      // setting id in cloud database
+    std::string         filament_id;      // setting id in cloud database
+    std::string         user_id;         // preset user_id
+    std::string         base_id;         // base id of preset
+    std::string         sync_info;       // enum: "delete", "create", "update", ""
+    std::string         custom_defined;  // enum: "1", "0", ""
+    std::string         description;     // 
+    long long           updated_time{0};    //last updated time
+    std::map<std::string, std::string> key_values;
+
+    static std::string  get_type_string(Preset::Type type);
+    // get string type for iot
+    static std::string  get_iot_type_string(Preset::Type type);
+    static Preset::Type get_type_from_string(std::string type_str);
+    void                load_info(const std::string& file);
+    void                save_info(std::string file = "");
+    void                remove_files();
+
+    //BBS: add logic for only difference save
+    //if parent_config is null, save all keys, otherwise, only save difference
+    void                save(DynamicPrintConfig* parent_config);
+    void                reload(Preset const & par
