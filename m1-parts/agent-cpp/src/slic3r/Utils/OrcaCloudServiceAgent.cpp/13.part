@@ -1,0 +1,121 @@
+)) return;
+
+    try {
+        std::ifstream ifs(sync_state_path);
+        if (ifs.good()) {
+            std::string line;
+            if (std::getline(ifs, line)) {
+                sync_state.last_sync_timestamp = std::stoll(line);
+            }
+        }
+    } catch (...) {
+        sync_state.last_sync_timestamp = 0;
+    }
+}
+
+void OrcaCloudServiceAgent::save_sync_state()
+{
+    std::lock_guard<std::recursive_mutex> lock(state_mutex);
+
+    if (sync_state_path.empty()) return;
+
+    try {
+        std::string tmp_path = sync_state_path + ".tmp";
+        std::ofstream ofs(tmp_path, std::ios::out | std::ios::trunc);
+        if (ofs.good()) {
+            ofs << std::to_string(sync_state.last_sync_timestamp);
+            ofs.close();
+            boost::filesystem::rename(tmp_path, sync_state_path);
+        }
+    } catch (...) {}
+}
+
+void OrcaCloudServiceAgent::clear_sync_state()
+{
+    std::lock_guard<std::recursive_mutex> lock(state_mutex);
+    sync_state = SyncState{};
+    if (!sync_state_path.empty() && boost::filesystem::exists(sync_state_path)) {
+        boost::filesystem::remove(sync_state_path);
+    }
+}
+
+// ============================================================================
+// Auth - PKCE and Session Management
+// ============================================================================
+
+void OrcaCloudServiceAgent::set_session_handler(SessionHandler handler)
+{
+    session_handler = std::move(handler);
+}
+
+void OrcaCloudServiceAgent::set_on_login_complete_handler(OnLoginCompleteHandler handler)
+{
+    on_login_complete_handler = std::move(handler);
+}
+
+const OrcaCloudServiceAgent::PkceBundle& OrcaCloudServiceAgent::pkce()
+{
+    if (pkce_bundle.verifier.empty() || pkce_bundle.challenge.empty() || pkce_bundle.state.empty()) {
+        regenerate_pkce();
+    }
+    return pkce_bundle;
+}
+
+void OrcaCloudServiceAgent::regenerate_pkce()
+{
+    pkce_bundle.verifier = generate_code_verifier();
+    pkce_bundle.challenge = sha256_base64url(pkce_bundle.verifier);
+    pkce_bundle.state = generate_state_token();
+    if (pkce_bundle.redirect.empty()) {
+        pkce_bundle.redirect = "http://localhost:" + std::to_string(pkce_bundle.loopback_port) + auth_constants::LOOPBACK_PATH;
+    }
+}
+
+void OrcaCloudServiceAgent::update_redirect_uri()
+{
+    int selected_port = choose_loopback_port();
+    pkce_bundle.loopback_port = selected_port;
+    pkce_bundle.redirect = "http://localhost:" + std::to_string(selected_port) + auth_constants::LOOPBACK_PATH;
+}
+
+// ============================================================================
+// Auth - Token Persistence
+// ============================================================================
+
+void OrcaCloudServiceAgent::persist_user_secret(const std::string& secret)
+{
+    if (secret.empty()) {
+        clear_user_secret();
+        return;
+    }
+
+    bool stored = false;
+
+    if (m_use_encrypted_token_file) {
+        // Use encrypted file only
+        auto key = sha256_bytes(get_encryption_key());
+        if (key.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: cannot derive key for user secret file storage";
+            return;
+        }
+
+        std::string payload;
+        if (!aes256gcm_encrypt(secret, key, payload)) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: failed to encrypt user secret for file storage";
+            return;
+        }
+
+        std::string signed_payload = payload;
+        if (auto mac = hmac_sha256_hex(payload, key); !mac.empty()) {
+            signed_payload = "v2:" + mac + ":" + payload;
+        }
+
+        compute_fallback_path();
+        if (secret_fallback_path.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no user secret storage path available; skipping file persistence";
+            return;
+        }
+        wxFileName path(wxString::FromUTF8(secret_fallback_path.c_str()));
+        path.Normalize();
+        if (!wxFileName::DirExists(path.GetPath())) {
+            wxFileName::Mkdir(path.GetPath(
