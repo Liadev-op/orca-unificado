@@ -1,0 +1,133 @@
+=================================
+// Constructor / Destructor
+// ============================================================================
+
+OrcaCloudServiceAgent::OrcaCloudServiceAgent(std::string log_dir)
+    : log_dir(std::move(log_dir))
+    , api_base_url(ORCA_DEFAULT_API_URL)
+    , auth_base_url(ORCA_DEFAULT_AUTH_URL)
+    , cloud_base_url(ORCA_DEFAULT_CLOUD_URL)
+{
+    auth_headers["apikey"] = ORCA_DEFAULT_PUB_KEY;
+    auth_headers["User-Agent"] = "OrcaUnificado/2.4.0";
+    pkce_bundle.loopback_port = choose_loopback_port();
+    update_redirect_uri();
+    regenerate_pkce();
+    compute_fallback_path();
+}
+
+OrcaCloudServiceAgent::~OrcaCloudServiceAgent()
+{
+    if (refresh_thread.joinable()) {
+        refresh_thread.join();
+    }
+}
+
+std::string OrcaCloudServiceAgent::generate_uuid_for_setting_id(const std::string& name, const std::string& user_id)
+{
+    if (name.empty()) {
+        return "";
+    }
+
+    // Mix user_id into the hashed input so two different users generating a setting_id
+    // for an identically-named preset get distinct UUIDs. Without this, the cloud's ID
+    // space collides across accounts and the second user's create gets HTTP 409 with
+    // server_profile=null on every sync (the foreign owner's record is not exposed).
+    static const boost::uuids::uuid orca_namespace =
+        boost::uuids::string_generator()("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+
+    boost::uuids::name_generator_sha1 gen(orca_namespace);
+    boost::uuids::uuid id = user_id.empty() ? gen(name) : gen(user_id + "/" + name);
+    return boost::uuids::to_string(id);
+}
+
+void OrcaCloudServiceAgent::configure_urls(AppConfig* app_config)
+{
+    if (!app_config) return;
+
+    // Read token storage preference
+    m_use_encrypted_token_file = app_config->get_bool(SETTING_USE_ENCRYPTED_TOKEN_FILE);
+
+    std::string api_url = app_config->get(CONFIG_ORCA_API_URL);
+    if (!api_url.empty()) {
+        api_base_url = api_url;
+    }
+
+    std::string auth_url = app_config->get(CONFIG_ORCA_AUTH_URL);
+    if (!auth_url.empty()) {
+        auth_base_url = auth_url;
+    }
+
+    std::string cloud_url = app_config->get(CONFIG_ORCA_CLOUD_URL);
+    if (!cloud_url.empty()) {
+        cloud_base_url = cloud_url;
+    }
+
+    std::string pub_key = app_config->get(CONFIG_ORCA_PUB_KEY);
+    if (!pub_key.empty()) {
+        auth_headers["apikey"] = pub_key;
+    }
+}
+
+void OrcaCloudServiceAgent::set_api_base_url(const std::string& url)
+{
+    api_base_url = url;
+}
+
+void OrcaCloudServiceAgent::set_auth_base_url(const std::string& url)
+{
+    auth_base_url = url;
+}
+
+void OrcaCloudServiceAgent::set_cloud_base_url(const std::string& url)
+{
+    cloud_base_url = url;
+}
+
+void OrcaCloudServiceAgent::set_use_encrypted_token_file(bool use)
+{
+    m_use_encrypted_token_file = use;
+}
+
+bool OrcaCloudServiceAgent::get_use_encrypted_token_file() const
+{
+    return m_use_encrypted_token_file;
+}
+
+// ============================================================================
+// ICloudServiceAgent - Lifecycle Methods
+// ============================================================================
+
+int OrcaCloudServiceAgent::init_log()
+{
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::set_config_dir(std::string cfg_dir)
+{
+    config_dir = cfg_dir;
+    wxFileName fallback(wxString::FromUTF8(cfg_dir.c_str()), "orca_refresh_token.sec");
+    fallback.Normalize();
+    secret_fallback_path = fallback.GetFullPath().ToStdString();
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::set_cert_file(std::string folder, std::string filename)
+{
+    // Not used by OrcaCloudServiceAgent (OAuth doesn't need client certs)
+    (void) folder;
+    (void) filename;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::set_country_code(std::string code)
+{
+    country_code = code;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+/// Decode a saved user session or a refresh token.
+///
+/// Returns `false` if invalid input, and a re-authentication is required.
+///
+/// If returns `true`, `out_refres

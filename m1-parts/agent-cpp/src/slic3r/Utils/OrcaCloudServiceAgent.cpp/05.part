@@ -1,0 +1,78 @@
+h_token` will contain the user refresh token, and `out_session` can be one of two scenarios:
+/// - if `out_session.logged_in` is `true`, then `out_session.refresh_token` and `out_session.user_id` are guaranteed to be present,
+///   and a refresh is not necessarily required until you need to make any network call
+/// - otherwise if `out_session.logged_in` is `false`, you should do a refresh immediately to get the user information before proceed,
+///   otherwise user will be logged out
+static bool parse_stored_secret(const std::string& secret, std::string& out_refresh_token, OrcaCloudServiceAgent::SessionInfo& out_session)
+{
+    out_refresh_token.clear();
+    out_session = OrcaCloudServiceAgent::SessionInfo{};
+
+    try {
+        // Valid secret should be a json object, otherwise it's a plain refresh token
+        const json secret_json = json::parse(secret, nullptr, false);
+        if (secret_json.type() != json::value_t::object) {
+            out_refresh_token = secret;
+            return true;
+        }
+
+        OrcaCloudServiceAgent::SessionInfo user_session{};
+        user_session.refresh_token = get_json_string_field(secret_json, "refresh_token");
+        user_session.user_id       = get_json_string_field(secret_json, "user_id");
+        user_session.user_name     = get_json_string_field(secret_json, "username");
+        user_session.user_nickname = get_json_string_field(secret_json, "nickname");
+        user_session.logged_in     = true;
+        // User session, must at least contains refresh token and user id
+        if (user_session.refresh_token.empty() || user_session.user_id.empty()) {
+            BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: secret does not contain valid user session, force re-authentication";
+            return false;
+        }
+
+        out_refresh_token = user_session.refresh_token;
+        out_session       = std::move(user_session);
+        return true;
+    } catch (const std::exception&) {
+        BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: parse_stored_secret exception, force re-authentication";
+        return false;
+    }
+}
+
+int OrcaCloudServiceAgent::start()
+{
+    regenerate_pkce();
+
+    // Attempt silent sign-in from stored refresh token
+    std::string stored_secret;
+    if (load_user_secret(stored_secret) && !stored_secret.empty()) {
+        // Backward compatibility: if secret it a json, then read it as use session,
+        // which allows us to refresh it in a background thread to speed up the app startup;
+        // otherwise it's a plain refresh token, then we force a sync refresh
+        std::string refresh_token;
+        SessionInfo stored_session;
+        if (parse_stored_secret(stored_secret, refresh_token, stored_session)) {
+            if (stored_session.logged_in) {
+                // We have a previously saved user session, use it. Skip re-persisting: the secret was
+                // just loaded from disk, so writing the identical bytes back is wasted startup I/O.
+                set_user_session(stored_session.access_token, stored_session.user_id, stored_session.user_name,
+                                 stored_session.user_nickname, stored_session.user_avatar, stored_session.refresh_token,
+                                 /*persist=*/false);
+            }
+            refresh_now(refresh_token, "refresh token", stored_session.logged_in);
+        }
+    }
+
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+// ============================================================================
+// ICloudServiceAgent - User Session Management
+// ============================================================================
+
+bool OrcaCloudServiceAgent::exchange_auth_code(const std::string& auth_code, const std::string& state, std::string& session_payload)
+{
+    const auto expected_state = pkce_bundle.state;
+    if (expected_state.empty()) {
+        BOOST_LOG_TRIVIAL(warning) << "[auth] event=code_exchange result=failure reason=no_expected_state";
+        return false;
+    }
+    if (state 
