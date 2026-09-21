@@ -1,0 +1,90 @@
+    e.SetControlDown(true);
+                e.m_keyCode = 'C';
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->copy_selection_to_clipboard(); },
+            "", nullptr, [this](){return m_plater->can_copy_to_clipboard(); }, this);
+        // BBS Paste
+        append_menu_item(editMenu, wxID_ANY, _L("Paste") + sep + ctrl_t + "V",
+            _L("Paste clipboard"), [this, handle_key_event](wxCommandEvent&) {
+                wxKeyEvent e;
+                e.SetEventType(wxEVT_KEY_DOWN);
+                e.SetControlDown(true);
+                e.m_keyCode = 'V';
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->paste_from_clipboard(); },
+            "", nullptr, [this](){return m_plater->can_paste_from_clipboard(); }, this);
+#if 0
+        // BBS Delete selected
+        append_menu_item(editMenu, wxID_ANY, _L("Delete selected") + "\t" + _L("Backspace"),
+            _L("Deletes the current selection"),[this](wxCommandEvent&) {
+                m_plater->remove_selected();
+            },
+            "", nullptr, [this](){return can_delete(); }, this);
+#endif
+        //BBS: delete all
+        append_menu_item(editMenu, wxID_ANY, _L("Delete all") + "\t" + ctrl + "D",
+            _L("Deletes all objects"),[this, handle_key_event](wxCommandEvent&) {
+                wxKeyEvent e;
+                e.SetEventType(wxEVT_KEY_DOWN);
+                e.SetControlDown(true);
+                e.m_keyCode = 'D';
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->delete_all_objects_from_model(); },
+            "", nullptr, [this](){return can_delete_all(); }, this);
+        editMenu->AppendSeparator();
+        // BBS Clone Selected
+        append_menu_item(editMenu, wxID_ANY, _L("Clone selected") + "\t" + ctrl + "K",
+            _L("Clone copies of selections"),[this, handle_key_event](wxCommandEvent&) {
+                wxKeyEvent e;
+                e.SetEventType(wxEVT_KEY_DOWN);
+                e.SetControlDown(true);
+                e.m_keyCode = 'M';
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->clone_selection();
+            },
+            "", nullptr, [this](){return can_clone(); }, this);
+        editMenu->AppendSeparator();
+        append_menu_item(editMenu, wxID_ANY, _L("Duplicate Current Plate"),
+            _L("Duplicate the current plate"),[this, handle_key_event](wxCommandEvent&) {
+                m_plater->duplicate_plate();
+            },
+            "", nullptr, [this](){return true;}, this);
+        editMenu->AppendSeparator();
+
+#endif
+
+        // BBS Select All
+        append_menu_item(editMenu, wxID_ANY, _L("Select all") + sep + ctrl_t + "A",
+            _L("Selects all objects"), [this, handle_key_event](wxCommandEvent&) {
+                wxKeyEvent e;
+                e.SetEventType(wxEVT_KEY_DOWN);
+                e.SetControlDown(true);
+                e.m_keyCode = 'A';
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->select_all(); },
+            "", nullptr, [this](){return can_select(); }, this);
+        // BBS Deslect All
+        append_menu_item(editMenu, wxID_ANY, _L("Deselect all") + sep + _L("Esc"),
+            _L("Deselects all objects"), [this, handle_key_event](wxCommandEvent&) {
+                wxKeyEvent e;
+                e.SetEventType(wxEVT_KEY_DOWN);
+                e.m_keyCode = WXK_ESCAPE;
+                if (handle_key_event(e)) {
+                    return;
+                }
+                m_plater->deselect_all(); },
+            "", nullptr, [this](){return can_deselect(); }, this);
+        //editMenu->AppendSeparator();
+        //append_menu_check_item(editMenu, wxID_ANY, _L("Show Model Mesh(TODO)"),
+        //    _L("Display triangles of models."), [this](wxCommandEvent& evt) {
+     

@@ -1,0 +1,65 @@
+   //        wxGetApp().app_config->set_bool("show_model_mesh", evt.GetInt() == 1);
+        //    }, nullptr, [this]() {return can_select(); }, [this]() { return wxGetApp().app_config->get("show_model_mesh").compare("true") == 0; }, this);
+        //append_menu_check_item(editMenu, wxID_ANY, _L("Show Model Shadow(TODO)"), _L("Display shadow of objects."),
+        //    [this](wxCommandEvent& evt) {
+        //        wxGetApp().app_config->set_bool("show_model_shadow", evt.GetInt() == 1);
+        //    }, nullptr, [this]() {return can_select(); }, [this]() { return wxGetApp().app_config->get("show_model_shadow").compare("true") == 0; }, this);
+        //editMenu->AppendSeparator();
+        //append_menu_check_item(editMenu, wxID_ANY, _L("Show Printable Box(TODO)"), _L("Display printable box."),
+        //    [this](wxCommandEvent& evt) {
+        //        wxGetApp().app_config->set_bool("show_printable_box", evt.GetInt() == 1);
+        //    }, nullptr, [this]() {return can_select(); }, [this]() { return wxGetApp().app_config->get("show_printable_box").compare("true") == 0; }, this);
+    }
+
+    // BBS
+
+    //publish menu
+
+    /*if (m_plater) {
+        publishMenu = new wxMenu();
+        add_common_publish_menu_items(publishMenu, this);
+        publishMenu->AppendSeparator();
+    }*/
+
+    // View menu
+    wxMenu* viewMenu = nullptr;
+    if (m_plater) {
+        viewMenu = new wxMenu();
+        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this));
+        viewMenu->AppendSeparator();
+
+        //BBS perspective view
+        wxWindowID camera_id_base = wxWindow::NewControlId(int(wxID_CAMERA_COUNT));
+        auto perspective_item = append_menu_radio_item(viewMenu, wxID_CAMERA_PERSPECTIVE + camera_id_base, _L("Use Perspective View"), _L("Use Perspective View"),
+            [this](wxCommandEvent&) {
+                wxGetApp().app_config->set_bool("use_perspective_camera", true);
+                wxGetApp().update_ui_from_settings();
+            }, nullptr);
+        //BBS orthogonal view
+        auto orthogonal_item = append_menu_radio_item(viewMenu, wxID_CAMERA_ORTHOGONAL + camera_id_base, _L("Use Orthogonal View"), _L("Use Orthogonal View"),
+            [this](wxCommandEvent&) {
+                wxGetApp().app_config->set_bool("use_perspective_camera", false);
+                wxGetApp().update_ui_from_settings();
+            }, nullptr);
+        this->Bind(wxEVT_UPDATE_UI, [viewMenu, camera_id_base](wxUpdateUIEvent& evt) {
+                if (wxGetApp().app_config->get("use_perspective_camera").compare("true") == 0)
+                    viewMenu->Check(wxID_CAMERA_PERSPECTIVE + camera_id_base, true);
+                else
+                    viewMenu->Check(wxID_CAMERA_ORTHOGONAL + camera_id_base, true);
+            }, perspective_item->GetId());
+        append_menu_check_item(viewMenu, wxID_ANY, _L("Auto Perspective"), _L("Automatically switch between orthographic and perspective when changing from top/bottom/side views."),
+            [this](wxCommandEvent&) {
+                wxGetApp().app_config->set_bool("auto_perspective", !wxGetApp().app_config->get_bool("auto_perspective"));
+                m_plater->get_current_canvas3D()->post_event(SimpleEvent(wxEVT_PAINT));
+            },
+            this, [this]() { return m_tabpanel->GetSelection() == TabPosition::tp3DEditor || m_tabpanel->GetSelection() == TabPosition::tpPreview; },
+            [this]() { return wxGetApp().app_config->get_bool("auto_perspective"); }, this);
+
+        viewMenu->AppendSeparator();
+        append_menu_check_item(viewMenu, wxID_ANY, _L("Show &G-code Window") + sep + "C", _L("Show G-code window in Preview scene."),
+            [this](wxCommandEvent &) {
+                wxGetApp().toggle_show_gcode_window();
+                m_plater->get_current_canvas3D()->post_event(SimpleEvent(wxEVT_PAINT));
+            },
+            this, [this]() { return m_tabpanel->GetSelection() == tpPreview; },
+            [this]() { return wxGetApp().
