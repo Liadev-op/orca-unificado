@@ -1,0 +1,103 @@
+#if ENABLE_GCODE_LINES_ID_IN_H_SLIDER
+//            if (dlg.seq_top_layer_only_changed() || dlg.seq_seq_top_gcode_indices_changed())
+//#else
+//            if (dlg.seq_top_layer_only_changed())
+//#endif // ENABLE_GCODE_LINES_ID_IN_H_SLIDER
+//                plater()->refresh_print();
+//        }, wxID_HIGHEST + wxID_PREFERENCES);
+
+
+    // set default tooltip timer in msec
+    // SetAutoPop supposedly accepts long integers but some bug doesn't allow for larger values
+    // (SetAutoPop is not available on GTK.)
+    wxToolTip::SetAutoPop(32767);
+
+    m_loaded = true;
+
+    // initialize layout
+    m_main_sizer = new wxBoxSizer(wxVERTICAL);
+    wxSizer* sizer = new wxBoxSizer(wxVERTICAL);
+#ifndef __APPLE__
+     sizer->Add(m_topbar, 0, wxEXPAND);
+#else
+     sizer->Add(panel_topbar, 0, wxEXPAND);
+#endif // __WINDOWS__
+
+
+    sizer->Add(m_main_sizer, 1, wxEXPAND);
+    SetSizerAndFit(sizer);
+    // initialize layout from config
+    update_layout();
+    sizer->SetSizeHints(this);
+
+#ifdef WIN32
+    // SetMaximize causes the window to overlap the taskbar, due to the fact this window has wxMAXIMIZE_BOX off
+    // https://forums.wxwidgets.org/viewtopic.php?t=50634
+    // Fix it here
+    this->Bind(wxEVT_MAXIMIZE, [this](auto &e) {
+        wxDisplay display(this);
+        auto      size = display.GetClientArea().GetSize();
+        auto      pos  = display.GetClientArea().GetPosition();
+        HWND      hWnd = GetHandle();
+        RECT      borderThickness;
+        SetRectEmpty(&borderThickness);
+        AdjustWindowRectEx(&borderThickness, GetWindowLongPtr(hWnd, GWL_STYLE), FALSE, 0);
+        const auto max_size = size + wxSize{-borderThickness.left + borderThickness.right, -borderThickness.top + borderThickness.bottom};
+        const auto current_size = GetSize();
+        SetSize({std::min(max_size.x, current_size.x), std::min(max_size.y, current_size.y)});
+        Move(pos + wxPoint{borderThickness.left, borderThickness.top});
+        e.Skip();
+    });
+#endif // WIN32
+    // BBS
+    Fit();
+
+    const wxSize min_size = wxGetApp().get_min_size(); //wxSize(76*wxGetApp().em_unit(), 49*wxGetApp().em_unit());
+
+    SetMinSize(min_size/*wxSize(760, 490)*/);
+    SetSize(wxSize(FromDIP(1200), FromDIP(800)));
+
+    Layout();
+
+    update_title();
+
+    // declare events
+    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< ": mainframe received close_widow event";
+        if (event.CanVeto() && m_plater->get_view3D_canvas3D()->get_gizmos_manager().is_in_editing_mode(true)) {
+            // prevents to open the save dirty project dialog
+            event.Veto();
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< "cancelled by gizmo in editing";
+            return;
+        }
+
+        //BBS:
+        //if (event.CanVeto() && !wxGetApp().check_and_save_current_preset_changes(_L("Application is closing"), _L("Closing Application while some presets are modified."))) {
+        //    event.Veto();
+        //    return;
+        //}
+        auto check = [](bool yes_or_no) {
+            if (yes_or_no)
+                return true;
+            return wxGetApp().check_and_save_current_preset_changes(_L("Application is closing"), _L("Closing Application while some presets are modified."));
+        };
+
+        // BBS: close save project
+        int result;
+        if (event.CanVeto() && ((result = m_plater->close_with_confirm(check)) == wxID_CANCEL)) {
+            event.Veto();
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< "cancelled by close_with_confirm selection";
+            return;
+        }
+        if (event.CanVeto() && !wxGetApp().check_print_host_queue()) {
+            event.Veto();
+            return;
+        }
+
+    #if 0 // BBS
+        //if (m_plater != nullptr) {
+        //    int saved_project = m_plater->save_project_if_dirty(_L("Closing Application. Current project is modified."));
+        //    if (saved_project == wxID_CANCEL) {
+        //        event.Veto();
+        //        return;
+  
