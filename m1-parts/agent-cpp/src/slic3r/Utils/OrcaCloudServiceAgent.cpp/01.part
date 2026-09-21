@@ -1,0 +1,120 @@
+ked = (r == WAIT_OBJECT_0 || r == WAIT_ABANDONED);    // ABANDONED: prior holder crashed
+#else
+        m_fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (m_fd == -1) { m_locked = true; return; }              // can't open -> don't block
+        struct flock fl{};
+        fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET; fl.l_start = 0; fl.l_len = 0;
+        int rc;
+        do { rc = ::fcntl(m_fd, F_SETLKW, &fl); } while (rc == -1 && errno == EINTR); // blocks in kernel
+        m_locked = (rc != -1);
+#endif
+    }
+
+    ~InterProcessRefreshTokenLock()
+    {
+#if defined(_WIN32)
+        if (m_handle) { if (m_locked) ::ReleaseMutex(m_handle); ::CloseHandle(m_handle); }
+#else
+        if (m_fd != -1) ::close(m_fd); // closing the fd releases the lock we hold
+#endif
+    }
+
+    bool locked() const { return m_locked; }
+
+    InterProcessRefreshTokenLock(const InterProcessRefreshTokenLock&)            = delete;
+    InterProcessRefreshTokenLock& operator=(const InterProcessRefreshTokenLock&) = delete;
+
+private:
+    bool m_locked = false;
+#if defined(_WIN32)
+    HANDLE m_handle = nullptr;
+#else
+    int    m_fd = -1;
+#endif
+};
+
+// Return a JSON field only when it is present as a string. Missing or non-string values normalize to empty.
+std::string get_json_string_field(const json& j, const std::string& key)
+{
+    if (j.contains(key) && j[key].is_string()) {
+        return j[key].get<std::string>();
+    }
+    return "";
+}
+
+// Resolve the human-facing UI label from provider metadata.
+std::string resolve_display_name(
+    const std::string& display_name,
+    const std::string& nickname,
+    const std::string& full_name,
+    const std::string& name,
+    const std::string& username)
+{
+    // Providers and payload shapes do not all use the same display-name field.
+    // Fallback sequence: display_name -> nickname -> full_name -> name
+    if (!display_name.empty()) return display_name;
+    if (!nickname.empty()) return nickname;
+    if (!full_name.empty()) return full_name;
+    if (!name.empty()) return name;
+    return username;
+}
+
+std::string base64url_encode(const std::vector<unsigned char>& data)
+{
+    std::string out;
+    out.resize(boost::beast::detail::base64::encoded_size(data.size()));
+    out.resize(boost::beast::detail::base64::encode(out.data(), data.data(), data.size()));
+
+    std::replace(out.begin(), out.end(), '+', '-');
+    std::replace(out.begin(), out.end(), '/', '_');
+    out.erase(std::remove(out.begin(), out.end(), '='), out.end());
+    return out;
+}
+
+bool base64url_decode(const std::string& input, std::vector<unsigned char>& out)
+{
+    std::string padded = input;
+    while (padded.size() % 4 != 0) padded.push_back('=');
+    std::string normalized = padded;
+    std::replace(normalized.begin(), normalized.end(), '-', '+');
+    std::replace(normalized.begin(), normalized.end(), '_', '/');
+
+    out.resize(boost::beast::detail::base64::decoded_size(normalized.size()));
+    auto res = boost::beast::detail::base64::decode(out.data(), normalized.data(), normalized.size());
+    if (!res.second) return false;
+    out.resize(res.first);
+    return true;
+}
+
+std::vector<unsigned char> random_bytes(size_t len)
+{
+    std::vector<unsigned char> bytes(len);
+    if (RAND_bytes(bytes.data(), static_cast<int>(len)) != 1) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<int> dist(0, 255);
+        for (auto& b : bytes) b = static_cast<unsigned char>(dist(gen));
+    }
+    return bytes;
+}
+
+std::string generate_code_verifier()
+{
+    constexpr int PKCE_VERIFIER_BYTES = 32;
+    auto bytes = random_bytes(PKCE_VERIFIER_BYTES);
+    return base64url_encode(bytes);
+}
+
+std::string generate_state_token()
+{
+    auto bytes = random_bytes(16);
+    std::stringstream ss;
+    for (auto b : bytes) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+    }
+    return ss.str();
+}
+
+std::string sha256_base64url(const std::string& input)
+{
+    unsigned char hash[SHA

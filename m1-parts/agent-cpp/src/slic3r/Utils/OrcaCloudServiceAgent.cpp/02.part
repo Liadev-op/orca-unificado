@@ -1,0 +1,107 @@
+256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(input.data()), input.size(), hash);
+    std::vector<unsigned char> hash_vec(hash, hash + sizeof(hash));
+    return base64url_encode(hash_vec);
+}
+
+std::string os_machine_id()
+{
+    // Orca: OS-level identifiers that live outside data_dir, so a copied data_dir
+    // on another machine yields a different key and the stored refresh
+    // token silently fails to decrypt (forcing a normal sign-in).
+#if defined(__linux__)
+    std::ifstream f("/etc/machine-id");
+    std::string id;
+    if (f.good()) {
+        std::getline(f, id);
+    }
+    if (!id.empty()) return id;
+#elif defined(_WIN32)
+    // HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid is a per-install
+    // identifier that isn't copied along with the user's data_dir.
+    HKEY hkey = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"SOFTWARE\\Microsoft\\Cryptography",
+                      0,
+                      KEY_READ | KEY_WOW64_64KEY,
+                      &hkey) == ERROR_SUCCESS) {
+        wchar_t buffer[128] = {0};
+        DWORD buffer_bytes = sizeof(buffer);
+        DWORD type = 0;
+        LONG status = RegQueryValueExW(hkey, L"MachineGuid", nullptr, &type,
+                                       reinterpret_cast<LPBYTE>(buffer), &buffer_bytes);
+        RegCloseKey(hkey);
+        if (status == ERROR_SUCCESS && type == REG_SZ && buffer_bytes > sizeof(wchar_t)) {
+            const size_t wlen = (buffer_bytes / sizeof(wchar_t)) - 1; // strip trailing NUL
+            return wxString(buffer, wlen).ToStdString();
+        }
+    }
+#elif defined(__APPLE__)
+    // gethostuuid() returns the hardware-tied host UUID (same value as
+    // "Hardware UUID" in System Information). It persists across OS
+    // reinstalls and kernel updates. Do NOT use sysctl kern.uuid — that
+    // is the running kernel image's build UUID (from kernel_uuid_string
+    // in XNU), which rotates on every macOS/kernel update and would
+    // sign users out on every OS update.
+    uuid_t host_id;
+    struct timespec wait = {0, 0};
+    if (gethostuuid(host_id, &wait) == 0) {
+        uuid_string_t str;
+        uuid_unparse(host_id, str);
+        return std::string(str);
+    }
+#endif
+
+    // Last resort: OS hostname.
+    return wxGetHostName().ToStdString();
+}
+
+std::string get_encryption_key()
+{
+    // Bind the encryption key to both the machine and the OS user. A data_dir
+    // copied to another machine changes the machine half; a data_dir shared
+    // between OS users on the same machine changes the user half. Either
+    // difference makes the stored token fail to decrypt and forces a sign-in.
+    return os_machine_id() + ":" + wxGetUserId().ToStdString();
+}
+
+std::vector<unsigned char> sha256_bytes(const std::string& input)
+{
+    std::vector<unsigned char> out(SHA256_DIGEST_LENGTH, 0);
+    SHA256(reinterpret_cast<const unsigned char*>(input.data()), input.size(), out.data());
+    return out;
+}
+
+std::string hmac_sha256_hex(const std::string& data, const std::vector<unsigned char>& key)
+{
+    unsigned int len = 0;
+    unsigned char result[EVP_MAX_MD_SIZE];
+    if (HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
+             reinterpret_cast<const unsigned char*>(data.data()), data.size(), result, &len) == nullptr) {
+        return {};
+    }
+
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (unsigned int i = 0; i < len; ++i) {
+        oss << std::setw(2) << static_cast<int>(result[i]);
+    }
+    return oss.str();
+}
+
+bool is_port_available(int port)
+{
+    if (port <= 0 || port > 65535) return false;
+
+    using boost::asio::ip::tcp;
+    boost::asio::io_context ctx;
+    boost::system::error_code ec;
+
+    tcp::acceptor acceptor(ctx);
+    tcp::endpoint endpoint(tcp::v4(), static_cast<unsigned short>(port));
+
+    acceptor.open(endpoint.protocol(), ec);
+    if (ec) return false;
+    acceptor.set_option(tcp::acceptor::reuse_address(true), ec);
+    if (ec) return false;
+    acc
