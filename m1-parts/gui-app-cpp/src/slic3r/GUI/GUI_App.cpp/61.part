@@ -1,0 +1,110 @@
+FIED,
+        //    wxLANGUAGE_GERMAN,
+        //    wxLANGUAGE_FRENCH,
+        //    wxLANGUAGE_SPANISH,
+        //    wxLANGUAGE_SWEDISH,
+        //    wxLANGUAGE_DUTCH,
+        //    wxLANGUAGE_HUNGARIAN,
+        //    wxLANGUAGE_JAPANESE,
+        //    wxLANGUAGE_ITALIAN
+        //};
+        //std::string cur_language = app_config->get("language");
+        //if (cur_language != "") {
+        //    //cleanup the language wrongly set before
+        //    const wxLanguageInfo *langinfo = nullptr;
+        //    bool embedded_language = false;
+        //    int language_num = sizeof(supported_languages) / sizeof(supported_languages[0]);
+        //    for (auto index = 0; index < language_num; index++) {
+        //        langinfo = wxLocale::GetLanguageInfo(supported_languages[index]);
+        //        std::string temp_lan = langinfo->CanonicalName.ToUTF8().data();
+        //        if (cur_language == temp_lan) {
+        //            embedded_language = true;
+        //            break;
+        //        }
+        //    }
+        //    if (!embedded_language)
+        //        app_config->erase("app", "language");
+        //}
+    }
+
+    if (! wxLocale::IsAvailable(language_info->Language)) {
+    @@TAB@@// Loading the language dictionary failed.
+        wxString message = "Switching Snapmaker Orca to language " + language_info->CanonicalName + " failed.";
+#if !defined(_WIN32) && !defined(__APPLE__)
+        // likely some linux system
+        message += "\nYou may need to reconfigure the missing locales, likely by running the \"locale-gen\" and \"dpkg-reconfigure locales\" commands.\n";
+#endif
+        if (initial)
+        @@TAB@@message + "\n\nApplication will close.";
+        wxMessageBox(message, "Snapmaker Orca - Switching language failed", wxOK | wxICON_ERROR);
+        if (initial)
+@@TAB@@@@TAB@@@@TAB@@std::exit(EXIT_FAILURE);
+@@TAB@@@@TAB@@else
+@@TAB@@@@TAB@@@@TAB@@return false;
+    }
+
+    // Release the old locales, create new locales.
+    //FIXME wxWidgets cause havoc if the current locale is deleted. We just forget it causing memory leaks for now.
+    m_wxLocale.release();
+    m_wxLocale = Slic3r::make_unique<wxLocale>();
+    m_wxLocale->Init(language_info->Language);
+    // Override language at the active wxTranslations class (which is stored in the active m_wxLocale)
+    // to load possibly different dictionary, for example, load Czech dictionary for Slovak language.
+    wxTranslations::Get()->SetLanguage(language_dict);
+    m_wxLocale->AddCatalog(SLIC3R_APP_KEY);
+    m_imgui->set_language(into_u8(language_info->CanonicalName));
+
+    //FIXME This is a temporary workaround, the correct solution is to switch to "C" locale during file import / export only.
+    //wxSetlocale(LC_NUMERIC, "C");
+    Preset::update_suffix_modified((_L("*") + " ").ToUTF8().data());
+    HintDatabase::get_instance().reinit();
+@@TAB@@return true;
+}
+
+Tab* GUI_App::get_tab(Preset::Type type)
+{
+    for (Tab* tab: tabs_list)
+        if (tab->type() == type)
+            return tab->completed() ? tab : nullptr; // To avoid actions with no-completed Tab
+    return nullptr;
+}
+
+Tab* GUI_App::get_plate_tab()
+{
+    return plate_tab;
+}
+
+Tab* GUI_App::get_model_tab(bool part)
+{
+    return model_tabs_list[part ? 1 : 0];
+}
+
+Tab* GUI_App::get_layer_tab()
+{
+    return model_tabs_list[2];
+}
+
+ConfigOptionMode GUI_App::get_mode()
+{
+    if (!app_config->has("user_mode"))
+        return comSimple;
+    //BBS
+    const auto mode = app_config->get("user_mode");
+    return mode == "advanced" ? comAdvanced :
+           mode == "simple" ? comSimple :
+           mode == "develop" ? comDevelop : comSimple;
+}
+
+std::string GUI_App::get_mode_str()
+{
+    if (!app_config->has("user_mode"))
+        return "simple";
+    return app_config->get("user_mode");
+}
+
+void GUI_App::save_mode(const /*ConfigOptionMode*/int mode)
+{
+    //BBS
+    const std::string mode_str = mode == comAdvanced ? "advanced" :
+                                 mode == comSimple ? "simple" :
+                     

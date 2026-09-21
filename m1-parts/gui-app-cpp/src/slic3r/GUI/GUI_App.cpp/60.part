@@ -1,0 +1,63 @@
+_info = language.empty() ? nullptr : wxLocale::FindLanguageInfo(language);
+@@TAB@@if (! language.empty() && (language_info == nullptr || language_info->CanonicalName.empty())) {
+@@TAB@@@@TAB@@// Fix for wxWidgets issue, where the FindLanguageInfo() returns locales with undefined ANSII code (wxLANGUAGE_KONKANI or wxLANGUAGE_MANIPURI).
+@@TAB@@@@TAB@@language_info = nullptr;
+    @@TAB@@BOOST_LOG_TRIVIAL(error) << boost::format("Language code \"%1%\" is not supported") % language.ToUTF8().data();
+@@TAB@@}
+
+@@TAB@@if (language_info != nullptr && language_info->LayoutDirection == wxLayout_RightToLeft) {
+    @@TAB@@BOOST_LOG_TRIVIAL(trace) << boost::format("The following language code requires right to left layout, which is not supported by Snapmaker_Orca: %1%") % language_info->CanonicalName.ToUTF8().data();
+@@TAB@@@@TAB@@language_info = nullptr;
+@@TAB@@}
+
+    if (language_info == nullptr) {
+        // PrusaSlicer does not support the Right to Left languages yet.
+        if (m_language_info_system != nullptr && m_language_info_system->LayoutDirection != wxLayout_RightToLeft)
+            language_info = m_language_info_system;
+        if (m_language_info_best != nullptr && m_language_info_best->LayoutDirection != wxLayout_RightToLeft)
+        @@TAB@@language_info = m_language_info_best;
+@@TAB@@    if (language_info == nullptr)
+@@TAB@@@@TAB@@@@TAB@@language_info = wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH_US);
+    }
+
+@@TAB@@BOOST_LOG_TRIVIAL(trace) << boost::format("Switching wxLocales to %1%") % language_info->CanonicalName.ToUTF8().data();
+
+    // Select language for locales. This language may be different from the language of the dictionary.
+    //if (language_info == m_language_info_best || language_info == m_language_info_system) {
+    //    // The current language matches user's default profile exactly. That's great.
+    //} else if (m_language_info_best != nullptr && language_info->CanonicalName.BeforeFirst('_') == m_language_info_best->CanonicalName.BeforeFirst('_')) {
+    //    // Use whatever the operating system recommends, if it the language code of the dictionary matches the recommended language.
+    //    // This allows a Swiss guy to use a German dictionary without forcing him to German locales.
+    //    language_info = m_language_info_best;
+    //} else if (m_language_info_system != nullptr && language_info->CanonicalName.BeforeFirst('_') == m_language_info_system->CanonicalName.BeforeFirst('_'))
+    //    language_info = m_language_info_system;
+
+    // Alternate language code.
+    wxLanguage language_dict = wxLanguage(language_info->Language);
+    if (language_info->CanonicalName.BeforeFirst('_') == "sk") {
+    @@TAB@@// Slovaks understand Czech well. Give them the Czech translation.
+    @@TAB@@language_dict = wxLANGUAGE_CZECH;
+@@TAB@@@@TAB@@BOOST_LOG_TRIVIAL(info) << "Using Czech dictionaries for Slovak language";
+    }
+
+#ifdef __linux__
+    // If we can't find this locale , try to use different one for the language
+    // instead of just reporting that it is impossible to switch.
+    if (! wxLocale::IsAvailable(language_info->Language) && m_language_info_system) {
+        std::string original_lang = into_u8(language_info->CanonicalName);
+        language_info = linux_get_existing_locale_language(language_info, m_language_info_system);
+        BOOST_LOG_TRIVIAL(info) << boost::format("Can't switch language to %1% (missing locales). Using %2% instead.")
+                                    % original_lang % language_info->CanonicalName.ToUTF8().data();
+    }
+#endif
+
+    if (! wxLocale::IsAvailable(language_info->Language)&&initial) {
+        language_info = wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH_UK);
+        app_config->set("language", language_info->CanonicalName.ToUTF8().data());
+    }
+    else if (initial) {
+        // bbs supported languages
+        //TODO: use a global one with Preference
+        //wxLanguage supported_languages[]{
+        //    wxLANGUAGE_ENGLISH,
+        //    wxLANGUAGE_CHINESE_SIMPLI
