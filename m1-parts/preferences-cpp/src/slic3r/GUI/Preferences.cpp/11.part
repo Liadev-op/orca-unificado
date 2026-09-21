@@ -1,0 +1,112 @@
+ current_association_str += _L("None");
+        else
+            current_association_str += registered_bin;
+
+        registered_instance_title->SetLabel(current_association_str);
+        auto size = registered_instance_title->GetTextExtent(current_association_str);
+        registered_instance_title->SetMinSize({ size.x + FromDIP(5), -1 });
+    };
+    update_current_association_str();
+
+    v_sizer->Add(registered_instance_title, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 60);
+
+    checkbox->Bind(wxEVT_TOGGLEBUTTON, [=](wxCommandEvent& e) {
+        wxGetApp().associate_url(url_prefix.ToStdWstring());
+        checkbox->Disable();
+        update_current_association_str();
+        e.Skip();
+    });
+
+    return v_sizer;
+}
+#endif // WIN32
+
+PreferencesDialog::PreferencesDialog(wxWindow *parent, wxWindowID id, const wxString &title, const wxPoint &pos, const wxSize &size, long style)
+    : DPIDialog(parent, id, _L("Preferences"), pos, size, style)
+{
+    SetBackgroundColour(*wxWHITE);
+    create();
+    wxGetApp().UpdateDlgDarkUI(this);
+    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
+        try {
+            NetworkAgent* agent = GUI::wxGetApp().getAgent();
+            if (agent) {
+                json j;
+                std::string value;
+                value = wxGetApp().app_config->get("auto_calculate");
+                j["auto_flushing"] = value;
+                value = wxGetApp().app_config->get("auto_calculate_when_filament_change");
+                j["auto_calculate_when_filament_change"] = value;
+                agent->track_event("preferences_changed", j.dump());
+            }
+        } catch(...) {}
+        event.Skip();
+        });
+}
+
+void PreferencesDialog::create()
+{
+    app_config             = get_app_config();
+    m_backup_interval_time = app_config->get("backup_interval");
+
+    // set icon for dialog
+    std::string icon_path = (boost::format("%1%/images/Snapmaker_OrcaTitle.ico") % resources_dir()).str();
+    SetIcon(wxIcon(encode_path(icon_path.c_str()), wxBITMAP_TYPE_ICO));
+    SetSizeHints(wxDefaultSize, wxDefaultSize);
+
+    auto main_sizer = new wxBoxSizer(wxVERTICAL);
+
+    m_scrolledWindow = new MyscrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+    m_scrolledWindow->SetScrollRate(5, 5);
+
+    m_sizer_body = new wxBoxSizer(wxVERTICAL);
+
+    auto m_top_line = new wxPanel(m_scrolledWindow, wxID_ANY, wxDefaultPosition, wxSize(DESIGN_RESOUTION_PREFERENCES.x, 1), wxTAB_TRAVERSAL);
+    m_top_line->SetBackgroundColour(DESIGN_GRAY400_COLOR);
+
+    m_sizer_body->Add(m_top_line, 0, wxEXPAND, 0);
+
+    auto general_page = create_general_page();
+#if !BBL_RELEASE_TO_PUBLIC
+    auto debug_page   = create_debug_page();
+#endif
+
+    m_sizer_body->Add(0, 0, 0, wxTOP, FromDIP(28));
+    m_sizer_body->Add(general_page, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(38));
+#if !BBL_RELEASE_TO_PUBLIC
+    m_sizer_body->Add(debug_page, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(38));
+#endif
+    m_sizer_body->Add(0, 0, 0, wxBOTTOM, FromDIP(28));
+    m_scrolledWindow->SetSizerAndFit(m_sizer_body);
+
+    main_sizer->Add(m_scrolledWindow, 1, wxEXPAND);
+
+    SetSizer(main_sizer);
+    Layout();
+    Fit();
+    int screen_height = wxDisplay(m_parent).GetClientArea().GetHeight();
+    if (this->GetSize().GetY() > screen_height)
+        this->SetSize(this->GetSize().GetX() + FromDIP(40), screen_height * 4 / 5);
+
+    CenterOnParent();
+    wxPoint start_pos = this->GetPosition();
+    if (start_pos.y < 0) { this->SetPosition(wxPoint(start_pos.x, 0)); }
+
+    //select first
+    auto event = wxCommandEvent(EVT_PREFERENCES_SELECT_TAB);
+    event.SetInt(0);
+    event.SetEventObject(this);
+    wxPostEvent(this, event);
+}
+
+PreferencesDialog::~PreferencesDialog()
+{
+    m_radio_group.DeleteContents(true);
+    m_hash_selector.clear();
+}
+
+void PreferencesDialog::on_dpi_changed(const wxRect &suggested_rect) { this->Refresh(); }
+
+void PreferencesDialog::Split(const std::string &src, const std::string &separator, std::vector<wxString> &dest)
+{
+    
