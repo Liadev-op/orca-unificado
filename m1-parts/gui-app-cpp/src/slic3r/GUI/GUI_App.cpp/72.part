@@ -1,0 +1,122 @@
+o) << "run wizard...";
+            run_wizard(ConfigWizard::RR_DATA_EMPTY);
+            BOOST_LOG_TRIVIAL(info) << "finished run wizard";
+
+            return true;
+        }
+
+    if (isAgree.empty())
+    {
+        run_wizard(ConfigWizard::RR_DATA_EMPTY); // Compatible with older versions
+        return true;
+    }
+
+    return false;
+}
+
+void GUI_App::check_updates(const bool verbose)
+{
+@@TAB@@PresetUpdater::UpdateResult updater_result;
+@@TAB@@try {
+@@TAB@@@@TAB@@updater_result = preset_updater->config_update(app_config->orig_version(), verbose ? PresetUpdater::UpdateParams::SHOW_TEXT_BOX : PresetUpdater::UpdateParams::SHOW_NOTIFICATION);
+@@TAB@@@@TAB@@if (updater_result == PresetUpdater::R_INCOMPAT_EXIT) {
+@@TAB@@@@TAB@@@@TAB@@mainframe->Close();
+@@TAB@@@@TAB@@}
+@@TAB@@@@TAB@@else if (updater_result == PresetUpdater::R_INCOMPAT_CONFIGURED) {
+            m_app_conf_exists = true;
+@@TAB@@@@TAB@@}
+@@TAB@@@@TAB@@else if (verbose && updater_result == PresetUpdater::R_NOOP) {
+
+@@TAB@@@@TAB@@}
+@@TAB@@}
+@@TAB@@catch (const std::exception & ex) {
+@@TAB@@@@TAB@@show_error(nullptr, ex.what());
+@@TAB@@}
+}
+
+bool GUI_App::open_browser_with_warning_dialog(const wxString& url, int flags/* = 0*/)
+{
+    return wxLaunchDefaultBrowser(url, flags);
+}
+
+// static method accepting a wxWindow object as first parameter
+// void warning_catcher{
+//     my($self, $message_dialog) = @_;
+//     return sub{
+//         my $message = shift;
+//         return if $message = ~/ GLUquadricObjPtr | Attempt to free unreferenced scalar / ;
+//         my @params = ($message, 'Warning', wxOK | wxICON_WARNING);
+//         $message_dialog
+//             ? $message_dialog->(@params)
+//             : Wx::MessageDialog->new($self, @params)->ShowModal;
+//     };
+// }
+
+// Do we need this function???
+// void GUI_App::notify(message) {
+//     auto frame = GetTopWindow();
+//     // try harder to attract user attention on OS X
+//     if (!frame->IsActive())
+//         frame->RequestUserAttention(defined(__WXOSX__/*&Wx::wxMAC */)? wxUSER_ATTENTION_ERROR : wxUSER_ATTENTION_INFO);
+//
+//     // There used to be notifier using a Growl application for OSX, but Growl is dead.
+//     // The notifier also supported the Linux X D - bus notifications, but that support was broken.
+//     //TODO use wxNotificationMessage ?
+// }
+
+
+#ifdef __WXMSW__
+static bool set_into_win_registry(HKEY hkeyHive, const wchar_t* pszVar, const wchar_t* pszValue)
+{
+    // see as reference: https://stackoverflow.com/questions/20245262/c-program-needs-an-file-association
+    wchar_t szValueCurrent[1000];
+    DWORD dwType;
+    DWORD dwSize = sizeof(szValueCurrent);
+
+    int iRC = ::RegGetValueW(hkeyHive, pszVar, nullptr, RRF_RT_ANY, &dwType, szValueCurrent, &dwSize);
+
+    bool bDidntExist = iRC == ERROR_FILE_NOT_FOUND;
+
+    if ((iRC != ERROR_SUCCESS) && !bDidntExist)
+        // an error occurred
+        return false;
+
+    if (!bDidntExist) {
+        if (dwType != REG_SZ)
+            // invalid type
+            return false;
+
+        if (::wcscmp(szValueCurrent, pszValue) == 0)
+            // value already set
+            return false;
+    }
+
+    DWORD dwDisposition;
+    HKEY hkey;
+    iRC = ::RegCreateKeyExW(hkeyHive, pszVar, 0, 0, 0, KEY_ALL_ACCESS, nullptr, &hkey, &dwDisposition);
+    bool ret = false;
+    if (iRC == ERROR_SUCCESS) {
+        iRC = ::RegSetValueExW(hkey, L"", 0, REG_SZ, (BYTE*)pszValue, (::wcslen(pszValue) + 1) * sizeof(wchar_t));
+        if (iRC == ERROR_SUCCESS)
+            ret = true;
+    }
+
+    RegCloseKey(hkey);
+    return ret;
+}
+
+static bool del_win_registry(HKEY hkeyHive, const wchar_t *pszVar, const wchar_t *pszValue)
+{
+    wchar_t szValueCurrent[1000];
+    DWORD   dwType;
+    DWORD   dwSize = sizeof(szValueCurrent);
+
+    int iRC = ::RegGetValueW(hkeyHive, pszVar, nullptr, RRF_RT_ANY, &dwType, szValueCurrent, &dwSize);
+
+    bool bDidntExist = iRC == ERROR_FILE_NOT_FOUND;
+
+    if ((iRC != ERROR_SUCCESS) && !bDidntExist)
+        return false;
+
+    if (!bDidntExist) {
+        iRC      = ::RegDel
