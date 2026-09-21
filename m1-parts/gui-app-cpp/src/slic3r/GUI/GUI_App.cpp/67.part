@@ -1,0 +1,138 @@
+   if(app_config != nullptr)
+            delete app_config;
+        app_config = nullptr;
+        init_app_config();
+    }*/
+    wxApp::OSXStoreOpenFiles(fileNames);
+}
+
+void GUI_App::MacOpenURL(const wxString& url)
+{
+    if (url.empty())
+        return;
+    // post_init() decides whether to start a blank project based on init_params->input_files,
+    // which is always empty here: macOS launches the app first and delivers the URL afterwards.
+    // Without this flag post_init resets the project that this download is about to load.
+    m_url_open_pending = true;
+    start_download(into_u8(url));
+}
+
+// wxWidgets override to get an event on open files.
+void GUI_App::MacOpenFiles(const wxArrayString &fileNames)
+{
+    bool single_instance = app_config->get("app", "single_instance") == "true";
+    if (m_post_initialized && !single_instance) {
+        bool has3mf = false;
+        std::vector<wxString> names;
+        for (auto & n : fileNames) {
+            has3mf |= n.EndsWith(".3mf");
+            names.push_back(n);
+        }
+        if (has3mf) {
+            start_new_slicer(names);
+            return;
+        }
+    }
+    std::vector<std::string> files;
+    std::vector<wxString>    gcode_files;
+    std::vector<wxString>    non_gcode_files;
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ", open files, size " << fileNames.size();
+    for (const auto& filename : fileNames) {
+        if (is_gcode_file(into_u8(filename)))
+            gcode_files.emplace_back(filename);
+        else {
+            files.emplace_back(into_u8(filename));
+            non_gcode_files.emplace_back(filename);
+        }
+    }
+    //BBS: remove GCodeViewer as seperate APP logic
+    /*if (m_app_mode == EAppMode::GCodeViewer) {
+        // Running in G-code viewer.
+        // Load the first G-code into the G-code viewer.
+        // Or if no G-codes, send other files to slicer.
+        if (! gcode_files.empty())
+            this->plater()->load_gcode(gcode_files.front());
+        if (!non_gcode_files.empty())
+            start_new_slicer(non_gcode_files, true);
+    } else*/
+    {
+        if (! files.empty()) {
+            if (m_post_initialized) {
+                wxArrayString input_files;
+                for (size_t i = 0; i < non_gcode_files.size(); ++i) {
+                    input_files.push_back(non_gcode_files[i]);
+                }
+                this->plater()->load_files(input_files);
+            } else {
+                for (size_t i = 0; i < files.size(); ++i) {
+                    this->init_params->input_files.emplace_back(files[i]);
+                }
+            }
+        } else {
+            if (m_post_initialized) {
+                this->plater()->load_gcode(gcode_files.front());
+            } else {
+                this->init_params->input_gcode = true;
+                this->init_params->input_files = { into_u8(gcode_files.front()) };
+            }
+        }
+        /*for (const wxString &filename : gcode_files)
+            start_new_gcodeviewer(&filename);*/
+    }
+}
+
+#endif /* __APPLE */
+
+Sidebar& GUI_App::sidebar()
+{
+    return plater_->sidebar();
+}
+
+GizmoObjectManipulation *GUI_App::obj_manipul()
+{
+    // If this method is called before plater_ has been initialized, return nullptr (to avoid a crash)
+    return (plater_ != nullptr) ? &plater_->get_view3D_canvas3D()->get_gizmos_manager().get_object_manipulation() : nullptr;
+}
+
+ObjectSettings* GUI_App::obj_settings()
+{
+    return sidebar().obj_settings();
+}
+
+ObjectList* GUI_App::obj_list()
+{
+    return sidebar().obj_list();
+}
+
+ObjectLayers* GUI_App::obj_layers()
+{
+    return sidebar().obj_layers();
+}
+
+Plater* GUI_App::plater()
+{
+    return plater_;
+}
+
+const Plater* GUI_App::plater() const
+{
+    return plater_;
+}
+
+ParamsPanel* GUI_App::params_panel()
+{
+    if (mainframe)
+        return mainframe->m_param_panel;
+    return nullptr;
+}
+
+ParamsDialog* GUI_App::params_dialog()
+{
+    if (mainframe)
+        return mainframe->m_param_dialog;
+    return nullptr;
+}
+
+Model& GUI_App::model()
+{
+    return plater_-
