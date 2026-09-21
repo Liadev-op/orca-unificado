@@ -1,0 +1,168 @@
+>model();
+}
+
+Downloader* GUI_App::downloader()
+{
+    return m_downloader.get();
+}
+
+DownloadManager* GUI_App::download_manager()
+{
+    return m_download_manager;
+}
+
+void GUI_App::load_url(wxString url)
+{
+    if (mainframe)
+        return mainframe->load_url(url);
+}
+
+void GUI_App::open_mall_page_dialog()
+{
+    std::string host_url;
+    std::string model_url;
+    std::string link_url;
+
+    int result = -1;
+
+    //model api url
+    host_url = get_model_http_url(app_config->get_country_code());
+
+    //model url
+
+    wxString language_code = this->current_language_code().BeforeFirst('_');
+    model_url = language_code.ToStdString();
+
+    if (getAgent() && mainframe) {
+
+        //login already
+        if (getAgent()->is_user_login()) {
+            std::string ticket;
+            result = getAgent()->request_bind_ticket(&ticket);
+
+            if(result == 0){
+                link_url = host_url + "api/sign-in/ticket?to=" + host_url + url_encode(model_url) + "&ticket=" + ticket;
+            }
+        }
+    }
+
+    if (result < 0) {
+       link_url = host_url + model_url;
+    }
+
+    if (link_url.find("?") != std::string::npos) {
+        link_url += "&from=Snapmaker_Orca";
+    } else {
+        link_url += "?from=Snapmaker_Orca";
+    }
+
+    wxLaunchDefaultBrowser(link_url);
+}
+
+void GUI_App::open_publish_page_dialog()
+{
+    std::string host_url;
+    std::string model_url;
+    std::string link_url;
+
+    int result = -1;
+
+    //model api url
+    host_url = get_model_http_url(app_config->get_country_code());
+
+    //publish url
+    wxString language_code = this->current_language_code().BeforeFirst('_');
+    model_url += (language_code.ToStdString() + "/my/models/publish");
+
+    if (getAgent() && mainframe) {
+
+        //login already
+        if (getAgent()->is_user_login()) {
+            std::string ticket;
+            result = getAgent()->request_bind_ticket(&ticket);
+
+            if (result == 0) {
+                link_url = host_url + "api/sign-in/ticket?to=" + host_url + url_encode(model_url) + "&ticket=" + ticket;
+            }
+        }
+    }
+
+    if (result < 0) {
+        link_url = host_url + model_url;
+    }
+
+    wxLaunchDefaultBrowser(link_url);
+}
+
+char GUI_App::from_hex(char ch) {
+    return isdigit(ch) ? ch - '0' : tolower(ch) - 'a' + 10;
+}
+
+std::string GUI_App::url_decode(std::string value) {
+    return Http::url_decode(value);
+}
+
+std::string GUI_App::url_encode(std::string value) {
+    return Http::url_encode(value);
+}
+
+void GUI_App::popup_ping_bind_dialog()
+{
+    if (m_ping_code_binding_dialog == nullptr) {
+        m_ping_code_binding_dialog = new PingCodeBindDialog();
+        m_ping_code_binding_dialog->ShowModal();
+        remove_ping_bind_dialog();
+    }
+}
+
+void GUI_App::remove_ping_bind_dialog()
+{
+    if (m_ping_code_binding_dialog != nullptr) {
+        m_ping_code_binding_dialog->Destroy();
+        delete m_mall_publish_dialog;
+        m_ping_code_binding_dialog = nullptr;
+    }
+}
+
+
+void GUI_App::remove_mall_system_dialog()
+{
+    if (m_mall_publish_dialog != nullptr) {
+        m_mall_publish_dialog->Destroy();
+        delete m_mall_publish_dialog;
+    }
+}
+
+void GUI_App::run_script(wxString js)
+{
+    if (mainframe)
+        return mainframe->RunScript(js);
+}
+
+Notebook* GUI_App::tab_panel() const
+{
+    if (mainframe)
+        return mainframe->m_tabpanel;
+    return nullptr;
+}
+
+NotificationManager * GUI_App::notification_manager()
+{
+    if (plater_)
+        return plater_->get_notification_manager();
+    return nullptr;
+}
+
+// extruders count from selected printer preset
+int GUI_App::extruders_cnt() const
+{
+    const Preset& preset = preset_bundle->printers.get_selected_preset();
+    return preset.printer_technology() == ptSLA ? 1 :
+           preset.config.option<ConfigOptionFloats>("nozzle_diameter")->values.size();
+}
+
+// extruders count from edited printer preset
+int GUI_App::extruders_edited_cnt() const
+{
+    const Preset& preset = preset_bundle->printers.get_edited_preset();
+    return preset.printer_technology() == ptSLA ? 1

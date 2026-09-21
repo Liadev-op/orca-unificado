@@ -1,0 +1,108 @@
+ :
+           preset.config.option<ConfigOptionFloats>("nozzle_diameter")->values.size();
+}
+
+// BBS
+int GUI_App::filaments_cnt() const
+{
+    return preset_bundle->filament_presets.size();
+}
+
+PrintSequence GUI_App::global_print_sequence() const
+{
+    PrintSequence global_print_seq = PrintSequence::ByDefault;
+    auto curr_preset_config = preset_bundle->prints.get_edited_preset().config;
+    if (curr_preset_config.has("print_sequence"))
+        global_print_seq = curr_preset_config.option<ConfigOptionEnum<PrintSequence>>("print_sequence")->value;
+    return global_print_seq;
+}
+
+wxString GUI_App::current_language_code_safe() const
+{
+@@TAB@@// Translate the language code to a code, for which Prusa Research maintains translations.
+@@TAB@@const std::map<wxString, wxString> mapping {
+@@TAB@@@@TAB@@{ "cs", @@TAB@@"cs_CZ", },
+@@TAB@@@@TAB@@{ "sk", @@TAB@@"cs_CZ", },
+@@TAB@@@@TAB@@{ "de", @@TAB@@"de_DE", },
+@@TAB@@@@TAB@@{ "nl", @@TAB@@"nl_NL", },
+@@TAB@@@@TAB@@{ "sv", @@TAB@@"sv_SE", },
+@@TAB@@@@TAB@@{ "es", @@TAB@@"es_ES", },
+@@TAB@@@@TAB@@{ "fr", @@TAB@@"fr_FR", },
+@@TAB@@@@TAB@@{ "it", @@TAB@@"it_IT", },
+@@TAB@@@@TAB@@{ "ja", @@TAB@@"ja_JP", },
+@@TAB@@@@TAB@@{ "ko", @@TAB@@"ko_KR", },
+@@TAB@@@@TAB@@{ "pl", @@TAB@@"pl_PL", },
+@@TAB@@@@TAB@@{ "uk", @@TAB@@"uk_UA", },
+@@TAB@@@@TAB@@{ "zh", @@TAB@@"zh_CN", },
+@@TAB@@@@TAB@@{ "ru", @@TAB@@"ru_RU", },
+        { "tr", @@TAB@@"tr_TR", },
+        { "pt", @@TAB@@"pt_BR", },
+        { "lt", @@TAB@@"lt_LT", },
+@@TAB@@};
+@@TAB@@wxString language_code = this->current_language_code().BeforeFirst('_');
+@@TAB@@auto it = mapping.find(language_code);
+@@TAB@@if (it != mapping.end())
+@@TAB@@@@TAB@@language_code = it->second;
+@@TAB@@else
+@@TAB@@@@TAB@@language_code = "en_US";
+@@TAB@@return language_code;
+}
+
+void GUI_App::open_web_page_localized(const std::string &http_address)
+{
+    open_browser_with_warning_dialog(http_address + "&lng=" + this->current_language_code_safe());
+}
+
+// If we are switching from the FFF-preset to the SLA, we should to control the printed objects if they have a part(s).
+// Because of we can't to print the multi-part objects with SLA technology.
+bool GUI_App::may_switch_to_SLA_preset(const wxString& caption)
+{
+    if (model_has_multi_part_objects(model())) {
+        // BBS: remove SLA related message
+        return false;
+    }
+    return true;
+}
+
+bool GUI_App::run_wizard(ConfigWizard::RunReason reason, ConfigWizard::StartPage start_page)
+{
+    wxCHECK_MSG(mainframe != nullptr, false, "Internal error: Main frame not created / null");
+
+    std::string strFinish = wxGetApp().app_config->get("firstguide", "finish");
+    long        pStyle    = wxCAPTION | wxCLOSE_BOX | wxSYSTEM_MENU;
+    if (strFinish == "false" || strFinish.empty())
+        pStyle = wxCAPTION | wxTAB_TRAVERSAL;
+
+    GuideFrame wizard(this, pStyle);
+    auto page = start_page == ConfigWizard::SP_WELCOME ? GuideFrame::BBL_WELCOME :
+                start_page == ConfigWizard::SP_FILAMENTS ? GuideFrame::BBL_FILAMENT_ONLY :
+                start_page == ConfigWizard::SP_PRINTERS ? GuideFrame::BBL_MODELS_ONLY :
+                GuideFrame::BBL_MODELS;
+    wizard.SetStartPage(page);
+    bool       res = false;
+    try {
+        res = wizard.run();
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "run_wizard exception: " << e.what();
+        flush_logs();
+    } catch (...) {
+        BOOST_LOG_TRIVIAL(error) << "run_wizard unknown exception";
+        flush_logs();
+    }
+
+    if (res) {
+        load_current_presets();
+        wxGetApp().sidebar().update_nozzle_settings();
+        update_publish_status();
+        mainframe->refresh_plugin_tips();
+        m_fltviews.reload_all();
+        // BBS: remove SLA related message
+    }
+    auto isAgree = wxGetApp().app_config->get("app", PRIVACY_POLICY_FLAGS);
+
+    user_update_privacy_notify(isAgree == "true");
+    BOOST_LOG_TRIVIAL(warning) << "run_wizard changed the privacy policy with: " << (isAgree);
+    return res;
+}
+
+void GUI_App::show_desktop_integrat
