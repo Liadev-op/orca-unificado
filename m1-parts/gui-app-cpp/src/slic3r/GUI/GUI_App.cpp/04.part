@@ -1,0 +1,126 @@
+tX + brandExt.GetWidth() + gap,
+                       tagY);
+
+        // Dynamic text y position (for SetText)
+        m_action_line_y_position = scaleY(384);
+    }
+
+    static wxBitmap MakeBitmap()
+    {
+        int width = FromDIP(480, nullptr);
+        int height = FromDIP(480, nullptr);
+
+        wxImage image(width, height);
+        wxBitmap new_bmp(image);
+
+        wxMemoryDC memDC;
+        memDC.SelectObject(new_bmp);
+        memDC.SetBrush(wxColour(255, 255, 255));
+        memDC.DrawRectangle(-1, -1, width + 2, height + 2);
+        memDC.DrawBitmap(new_bmp, 0, 0, true);
+        return new_bmp;
+    }
+
+    void set_bitmap(wxBitmap& bmp)
+    {
+        m_window->SetBitmap(bmp);
+        m_window->Refresh();
+        m_window->Update();
+    }
+
+    void scale_bitmap(wxBitmap& bmp, float scale)
+    {
+        if (scale == 1.0)
+            return;
+
+        wxImage image = bmp.ConvertToImage();
+        if (!image.IsOk() || image.GetWidth() == 0 || image.GetHeight() == 0)
+            return;
+
+        int width   = int(scale * image.GetWidth());
+        int height  = int(scale * image.GetHeight());
+        image.Rescale(width, height, wxIMAGE_QUALITY_BILINEAR);
+
+        bmp = wxBitmap(std::move(image));
+    }
+
+    void scale_font(wxFont& font, float scale)
+    {
+#ifdef __WXMSW__
+        // Workaround for the font scaling in respect to the current active display,
+        // not for the primary display, as it's implemented in Font.cpp
+        // See https://github.com/wxWidgets/wxWidgets/blob/master/src/msw/font.cpp
+        // void wxNativeFontInfo::SetFractionalPointSize(float pointSizeNew)
+        wxNativeFontInfo nfi= *font.GetNativeFontInfo();
+        float pointSizeNew  = scale * font.GetPointSize();
+        nfi.lf.lfHeight     = nfi.GetLogFontHeightAtPPI(pointSizeNew, get_dpi_for_window(this));
+        nfi.pointSize       = pointSizeNew;
+        font = wxFont(nfi);
+#else
+        font.Scale(scale);
+#endif //__WXMSW__
+    }
+
+
+private:
+    wxStaticText* m_staticText_slicer_name;
+    wxStaticText* m_staticText_slicer_version;
+    wxStaticBitmap* m_bitmap;
+    wxStaticText* m_staticText_loading;
+
+    wxBitmap    m_main_bitmap;
+    wxFont      m_action_font;
+    int         m_action_line_y_position;
+    float       m_scale {1.0};
+
+    struct ConstantText
+    {
+        wxString title;
+        wxString version;
+
+        wxFont   titleFont;
+        wxFont   versionFont;
+        wxFont   loadingFont;
+
+        void init()
+        {
+            title    = "Snapmaker Orca";
+            version  = wxString::Format("V%s %s", Snapmaker_VERSION, _L("Release"));
+
+            titleFont   = Label::sysFont(20, false);
+            versionFont = Label::Body_13;
+            loadingFont = Label::Body_11;
+        }
+    }
+    m_constant_text;
+};
+
+#ifdef __linux__
+bool static check_old_linux_datadir(const wxString& app_name) {
+    // If we are on Linux and the datadir does not exist yet, look into the old
+    // location where the datadir was before version 2.3. If we find it there,
+    // tell the user that he might wanna migrate to the new location.
+    // (https://github.com/prusa3d/PrusaSlicer/issues/2911)
+    // To be precise, the datadir should exist, it is created when single instance
+    // lock happens. Instead of checking for existence, check the contents.
+
+    namespace fs = boost::filesystem;
+
+    std::string new_path = Slic3r::data_dir();
+
+    wxString dir;
+    if (! wxGetEnv(wxS("XDG_CONFIG_HOME"), &dir) || dir.empty() )
+        dir = wxFileName::GetHomeDir() + wxS("/.config");
+    std::string default_path = (dir + "/" + app_name).ToUTF8().data();
+
+    if (new_path != default_path) {
+        // This happens when the user specifies a custom --datadir.
+        // Do not show anything in that case.
+        return true;
+    }
+
+    fs::path data_dir = fs::path(new_path);
+    if (! fs::is_directory(data_dir))
+        return true; // This should not happen.
+
+    int file_count = std::distance(fs::directory_iterator(data_dir), fs::directory_iterator(
