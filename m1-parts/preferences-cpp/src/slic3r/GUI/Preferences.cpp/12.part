@@ -1,0 +1,85 @@
+std::string            str = src;
+    std::string            substring;
+    std::string::size_type start = 0, index;
+    dest.clear();
+    index = str.find_first_of(separator, start);
+    do {
+        if (index != std::string::npos) {
+            substring = str.substr(start, index - start);
+            dest.push_back(substring);
+            start = index + separator.size();
+            index = str.find(separator, start);
+            if (start == std::string::npos) break;
+        }
+    } while (index != std::string::npos);
+
+    substring = str.substr(start);
+    dest.push_back(substring);
+}
+
+wxWindow* PreferencesDialog::create_general_page()
+{
+    auto page = new wxWindow(m_scrolledWindow, wxID_ANY);
+    page->SetBackgroundColour(*wxWHITE);
+    wxBoxSizer *sizer_page = new wxBoxSizer(wxVERTICAL);
+
+    auto title_general_settings = create_item_title(_L("General Settings"), page, _L("General Settings"));
+
+    // bbs supported languages
+    wxLanguage supported_languages[]{
+        wxLANGUAGE_ENGLISH,
+        wxLANGUAGE_CHINESE_SIMPLIFIED,
+        wxLANGUAGE_CHINESE,
+        wxLANGUAGE_GERMAN,
+        wxLANGUAGE_CZECH,
+        wxLANGUAGE_FRENCH,
+        wxLANGUAGE_SPANISH,
+        wxLANGUAGE_SWEDISH,
+        wxLANGUAGE_DUTCH,
+        wxLANGUAGE_HUNGARIAN,
+        wxLANGUAGE_JAPANESE,
+        wxLANGUAGE_ITALIAN,
+        wxLANGUAGE_KOREAN,
+        wxLANGUAGE_RUSSIAN,
+        wxLANGUAGE_UKRAINIAN,
+        wxLANGUAGE_TURKISH,
+        wxLANGUAGE_POLISH,
+        wxLANGUAGE_CATALAN,
+        wxLANGUAGE_PORTUGUESE_BRAZILIAN,
+        wxLANGUAGE_LITHUANIAN,
+    };
+
+    auto translations = wxTranslations::Get()->GetAvailableTranslations(SLIC3R_APP_KEY);
+    std::vector<const wxLanguageInfo *> language_infos;
+    language_infos.emplace_back(wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH));
+    for (size_t i = 0; i < translations.GetCount(); ++i) {
+        const wxLanguageInfo *langinfo = wxLocale::FindLanguageInfo(translations[i]);
+
+        if (langinfo == nullptr) continue;
+        int language_num = sizeof(supported_languages) / sizeof(supported_languages[0]);
+        for (auto si = 0; si < language_num; si++) {
+            if (langinfo == wxLocale::GetLanguageInfo(supported_languages[si])) {
+                language_infos.emplace_back(langinfo);
+            }
+        }
+        //if (langinfo != nullptr) language_infos.emplace_back(langinfo);
+    }
+    sort_remove_duplicates(language_infos);
+    std::sort(language_infos.begin(), language_infos.end(), [](const wxLanguageInfo *l, const wxLanguageInfo *r) { return l->Description < r->Description; });
+    auto item_language = create_item_language_combobox(_L("Language"), page, _L("Language"), 50, "language", language_infos);
+
+    std::vector<wxString> Regions         = {_L("Asia-Pacific"), _L("Chinese Mainland"), _L("Europe"), _L("North America"), _L("Others")};
+    auto                  item_region= create_item_region_combobox(_L("Login Region"), page, _L("Login Region"), Regions);
+
+    auto item_stealth_mode = create_item_checkbox(_L("Stealth mode"), page,
+        _L("This disables all Orca Cloud features, including profile syncing. Users who prefer to work entirely offline can enable this option.\nNote: When Stealth Mode is enabled, your user profiles will not be backed up to Orca Cloud. Snapmaker Device / U1 LAN is not this setting."),
+        50, "stealth_mode",
+        [](bool new_val, bool /*old_val*/) {
+            if (new_val)
+                wxGetApp().on_stealth_mode_enter();
+            return new_val;
+        });
+    auto item_enable_plugin = create_item_checkbox(_L("Enable network plugin"), page, _L("Enable network plugin"), 50, "installed_networking");
+    auto item_legacy_network_plugin = create_item_checkbox(_L("Use legacy network plugin (Takes effect after restarting Orca Unificado)"), page, _L("Disable to use latest network plugin that supports new BambuLab firmwares."), 50, "legacy_networking");
+
+    //auto item_check_stable_version_only = create_item_checkbox(_L("Check for st
