@@ -1,0 +1,110 @@
+g_Freq_Test_Dlg((wxWindow*)this, wxID_ANY, m_plater);
+            m_IS_freq_calib_dlg->ShowModal();
+        },
+        "", nullptr,
+        [this]() {return m_plater->is_view3D_shown();; }, this);
+    append_menu_item(
+        input_shaping_menu, wxID_ANY, _L("Input Shaping Damping/zeta factor"), _L("Input Shaping Damping/zeta factor"),
+        [this](wxCommandEvent&) {
+            if (!m_IS_damp_calib_dlg)
+                m_IS_damp_calib_dlg = new Input_Shaping_Damp_Test_Dlg((wxWindow*)this, wxID_ANY, m_plater);
+            m_IS_damp_calib_dlg->ShowModal();
+        },
+        "", nullptr,
+        [this]() {return m_plater->is_view3D_shown();; }, this);
+    calib_menu->AppendSubMenu(input_shaping_menu, _L("Input Shaping"));
+
+    // VFA
+    append_menu_item(calib_menu, wxID_ANY, _L("VFA"), _L("VFA"),
+        [this](wxCommandEvent&) {
+            if (!m_vfa_test_dlg)
+                m_vfa_test_dlg = new VFA_Test_Dlg((wxWindow*)this, wxID_ANY, m_plater);
+            m_vfa_test_dlg->ShowModal();
+        }, "", nullptr,
+        [this]() {return m_plater->is_view3D_shown();; }, this);
+    // help
+    append_menu_item(calib_menu, wxID_ANY, _L("Tutorial"), _L("Calibration help"),
+        [this](wxCommandEvent&) { wxLaunchDefaultBrowser("https://github.com/SoftFever/OrcaSlicer/wiki/Calibration", wxBROWSER_NEW_WINDOW); }, "", nullptr,
+        [this]() {return m_plater->is_view3D_shown();; }, this);
+
+    m_menubar->Append(calib_menu,wxString::Format("&%s", _L("Calibration")));
+    if (helpMenu)
+        m_menubar->Append(helpMenu, wxString::Format("&%s", _L("Help")));
+    SetMenuBar(m_menubar);
+
+#endif
+
+#ifdef _MSW_DARK_MODE
+    if (wxGetApp().tabs_as_menu())
+        m_menubar->EnableTop(6, false);
+#endif
+
+#ifdef __APPLE__
+    // This fixes a bug on Mac OS where the quit command doesn't emit window close events
+    // wx bug: https://trac.wxwidgets.org/ticket/18328
+    wxMenu* apple_menu = m_menubar->OSXGetAppleMenu();
+    if (apple_menu != nullptr) {
+        apple_menu->Bind(wxEVT_MENU, [this](wxCommandEvent &) {
+            Close();
+        }, wxID_EXIT);
+    }
+#endif // __APPLE__
+}
+
+void MainFrame::set_max_recent_count(int max)
+{
+    max = max < 0 ? 0 : max > 10000 ? 10000 : max;
+    size_t count = m_recent_projects.GetCount();
+    m_recent_projects.SetMaxFiles(max);
+    if (count != m_recent_projects.GetCount()) {
+        count = m_recent_projects.GetCount();
+        std::vector<std::string> recent_projects;
+        for (size_t i = 0; i < count; ++i) {
+            recent_projects.push_back(into_u8(m_recent_projects.GetHistoryFile(i)));
+        }
+        wxGetApp().app_config->set_recent_projects(recent_projects);
+        wxGetApp().app_config->save();
+        m_webview->SendRecentList(-1);
+
+        // wcp 订阅
+        json data;
+        wxGetApp().mainframe->get_recent_projects(data, INT_MAX);
+        wxGetApp().recent_file_notify(data);
+        
+    }
+}
+
+void MainFrame::open_menubar_item(const wxString& menu_name,const wxString& item_name)
+{
+    if (m_menubar == nullptr)
+        return;
+    // Get menu object from menubar
+    int     menu_index = m_menubar->FindMenu(menu_name);
+    wxMenu* menu       = m_menubar->GetMenu(menu_index);
+    if (menu == nullptr) {
+        BOOST_LOG_TRIVIAL(error) << "Mainframe open_menubar_item function couldn't find menu: " << menu_name;
+        return;
+    }
+    // Get item id from menu
+    int     item_id   = menu->FindItem(item_name);
+    if (item_id == wxNOT_FOUND)
+    {
+        // try adding three dots char
+        item_id = menu->FindItem(item_name + dots);
+    }
+    if (item_id == wxNOT_FOUND)
+    {
+        BOOST_LOG_TRIVIAL(error) << "Mainframe open_menubar_item function couldn't find item: " << item_name;
+        return;
+    }
+    // wxEVT_MENU will trigger item
+    wxPostEvent((wxEvtHandler*)menu, wxCommandEvent(wxEVT_MENU, item_id));
+}
+
+void MainFrame::init_menubar_as_gcodeviewer()
+{
+    //BBS do not show gcode viewer mebu
+#if 0
+    wxMenu* fileMenu = new wxMenu;
+    {
+        append_menu_i

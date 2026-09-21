@@ -1,0 +1,99 @@
+tem(fileMenu, wxID_ANY, _L("&Open G-code") + dots + "\t" + ctrl + "O", _L("Open a G-code file"),
+            [this](wxCommandEvent&) { if (m_plater != nullptr) m_plater->load_gcode(); }, "open", nullptr,
+            [this]() {return m_plater != nullptr; }, this);
+#ifdef __APPLE__
+        append_menu_item(fileMenu, wxID_ANY, _L("Re&load from Disk") + dots + "\t" + ctrl + shift + "R",
+            _L("Reload the plater from disk"), [this](wxCommandEvent&) { m_plater->reload_gcode_from_disk(); },
+            "", nullptr, [this]() { return !m_plater->get_last_loaded_gcode().empty(); }, this);
+#else
+        append_menu_item(fileMenu, wxID_ANY, _L("Re&load from Disk") + sep + "F5",
+            _L("Reload the plater from disk"), [this](wxCommandEvent&) { m_plater->reload_gcode_from_disk(); },
+            "", nullptr, [this]() { return !m_plater->get_last_loaded_gcode().empty(); }, this);
+#endif // __APPLE__
+        fileMenu->AppendSeparator();
+        append_menu_item(fileMenu, wxID_ANY, _L("Export &Toolpaths as OBJ") + dots, _L("Export toolpaths as OBJ"),
+            [this](wxCommandEvent&) { if (m_plater != nullptr) m_plater->export_toolpaths_to_obj(); }, "export_plater", nullptr,
+            [this]() {return can_export_toolpaths(); }, this);
+        append_menu_item(fileMenu, wxID_ANY, _L("Open &Slicer") + dots, _L("Open Slicer"),
+            [](wxCommandEvent&) { start_new_slicer(); }, "", nullptr,
+            []() {return true; }, this);
+        fileMenu->AppendSeparator();
+        append_menu_item(fileMenu, wxID_EXIT, _L("&Quit"), wxString::Format(_L("Quit %s"), SLIC3R_APP_NAME),
+            [this](wxCommandEvent&) { Close(false); });
+    }
+
+    // View menu
+    wxMenu* viewMenu = nullptr;
+    if (m_plater != nullptr) {
+        viewMenu = new wxMenu();
+        add_common_view_menu_items(viewMenu, this, std::bind(&MainFrame::can_change_view, this));
+    }
+
+    // helpmenu
+    auto helpMenu = generate_help_menu();
+
+    m_menubar = new wxMenuBar();
+    m_menubar->Append(fileMenu, _L("&File"));
+    if (viewMenu != nullptr) m_menubar->Append(viewMenu, _L("&View"));
+    // Add additional menus from C++
+    wxGetApp().add_config_menu(m_menubar);
+    m_menubar->Append(helpMenu, _L("&Help"));
+    SetMenuBar(m_menubar);
+
+#ifdef __APPLE__
+    // This fixes a bug on Mac OS where the quit command doesn't emit window close events
+    // wx bug: https://trac.wxwidgets.org/ticket/18328
+    wxMenu* apple_menu = m_menubar->OSXGetAppleMenu();
+    if (apple_menu != nullptr) {
+        apple_menu->Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+            Close();
+            }, wxID_EXIT);
+    }
+#endif // __APPLE__
+#endif
+}
+
+void MainFrame::update_menubar()
+{
+    if (wxGetApp().is_gcode_viewer())
+        return;
+
+    const bool is_fff = plater()->printer_technology() == ptFFF;
+}
+
+void MainFrame::reslice_now()
+{
+    if (m_plater)
+        (void)m_plater->reslice();
+}
+
+void MainFrame::start_slice()
+{
+    if (!m_plater)
+        return;
+    m_plater->exit_gizmo();
+    m_plater->update(true, true);
+    if (m_slice_select == eSliceAll)
+        wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_SLICE_ALL));
+    else
+        wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_SLICE_PLATE));
+}
+
+struct ConfigsOverwriteConfirmDialog : MessageDialog
+{
+    ConfigsOverwriteConfirmDialog(wxWindow *parent, wxString name, bool exported)
+        : MessageDialog(parent,
+                        wxString::Format(exported ? _L("A file exists with the same name: %s, do you want to overwrite it?") :
+                                                  _L("A config exists with the same name: %s, do you want to overwrite it?"),
+                                         name),
+                        exported ? _L("Overwrite file") : _L("Overwrite config"),
+                        wxYES_NO | wxNO_DEFAULT)
+    {
+        add_button(wxID_YESTOALL, false, _L("Yes to All"));
+        add_button(wxID_NOTOALL, false, _L("No to All"));
+    }
+};
+
+void MainFrame::export_config()
+{
+    ExportConfigsDial
