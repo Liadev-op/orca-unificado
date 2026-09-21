@@ -1,0 +1,97 @@
+orMsg);
+            if(by_user)
+                GUI::wxGetApp().QueueEvent(evt);
+          BOOST_LOG_TRIVIAL(error) << format("Error getting: `%1%`: HTTP %2%, %3%", "check_new_version_sf", http_status,
+                                             error);
+        })
+        .timeout_connect(TIMEOUT_CONNECT)
+        .on_complete([this,by_user](std::string body, unsigned http_status) {
+        // Http response OK
+        if (http_status != 200) {
+            BOOST_LOG_TRIVIAL(error) << format("status not 200 with: `%1%`: HTTP %2%", "check_new_version_sf", http_status);
+            return;
+          }
+        try {
+            json jsonObj = json::parse(body);
+            auto errCode = jsonObj["code"];
+            if (errCode != 200)
+                return;
+
+            auto dataObj             = jsonObj.value("data", json::object());
+            auto isFullUpgrade       = dataObj.value("is_full_upgrade", true);
+            auto isForceUpgrade      = dataObj.value("is_force_upgrade", false);
+            version_info.force_upgrade  = isForceUpgrade;
+
+            version_info.version_str = dataObj.value("version", "");
+            auto releaseType         = dataObj.value("release_type", "");
+
+            if (releaseType != RELEASE_TYPE_STABLE)
+            {
+                if (by_user)
+                    this->no_new_version();
+                return;
+            }
+
+            auto platformType        = dataObj.value("platform_type", "");
+            int  fileSize            = 0;
+            std::string fileMd5             = "";
+            std::string fileSha256          = "";
+            std::string reservedData        = "";
+            std::string reservedData2        = "";
+
+            // win x86_x64,  mac arm/x86_x64  universal
+            auto fullObj = dataObj.value("full", json::object());
+            auto defaultObj = fullObj.value("default", json::object());
+            auto armObj     = fullObj.value("arm", json::object());
+            auto intelObj   = fullObj.value("intel", json::object());
+            version_info.description = fullObj.value("file_describe", "");
+
+            if (platformType == "win") {
+                fileSize   = defaultObj.value("file_size", 0);
+                fileMd5    = defaultObj.value("file_md5", "");
+                fileSha256 = defaultObj.value("file_sha256", "");
+                version_info.url         = defaultObj.value("file_url", "");
+
+                reservedData             = defaultObj.value("reserved_1", "");
+                reservedData2            = defaultObj.value("reserved_2", "");
+            }
+            else if (platformType == "mac")
+            {
+                bool isArm64 = false;
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+                isArm64 = true;
+#else
+                isArm64 = false;
+#endif
+                json platformObj = defaultObj;
+                if (isArm64) {
+                    if (!armObj.empty()) {
+                        platformObj = armObj;
+                    }
+                }
+                else
+                {
+                    if (!intelObj.empty()) {
+                        platformObj = intelObj;
+                    }
+                }
+
+                fileSize         = platformObj.value("file_size", 0);
+                fileMd5          = platformObj.value("file_md5", "");
+                fileSha256       = platformObj.value("file_sha256", "");
+                version_info.url = platformObj.value("file_url", "");
+
+                reservedData  = platformObj.value("reserved_1", "");
+                reservedData2 = platformObj.value("reserved_2", "");
+
+            }
+            else
+            {
+                BOOST_LOG_TRIVIAL(warning) << "don't support linux upgrade";
+                return;
+            }
+
+            std::regex matcher("[0-9]+\\.[0-9]+(\\.[0-9]+)*(-[A-Za-z0-9]+)?(\\+[A-Za-z0-9]+)?");
+            Semver     current_version = get_version(Snapmaker_VERSION, matcher);
+
+            Semver 
