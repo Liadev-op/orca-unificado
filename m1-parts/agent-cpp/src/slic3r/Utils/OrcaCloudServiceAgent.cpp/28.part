@@ -1,0 +1,29 @@
+_JSON_KEY_NAME) == value_map.end()) {
+                value_map[BBL_JSON_KEY_NAME] = preset_name;
+            }
+
+            // Store as: presets[preset_name][key] = value
+            // This matches the format expected by PresetBundle::load_user_presets
+            (*presets)[preset_name] = value_map;
+        }
+
+        BOOST_LOG_TRIVIAL(info) << "get_shared_bundle: loaded " << presets->size()
+                                << " presets for bundle_id=" << bundle_id;
+        return 0;
+
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "get_shared_bundle: JSON parse error: " << e.what();
+        return -1;
+    }
+}
+
+std::string OrcaCloudServiceAgent::token_lock_path() const
+{
+    if (config_dir.empty())
+        return {};
+    wxFileName lock(wxString::FromUTF8(config_dir.c_str()), "orca_refresh_token.lock");
+    lock.Normalize();
+    return lock.GetFullPath().ToStdString();
+}
+
+} // namespace Slic3r
