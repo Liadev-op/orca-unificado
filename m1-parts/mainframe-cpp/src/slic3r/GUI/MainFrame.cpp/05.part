@@ -101,4 +101,4 @@
             }
             return;
         }
-        if (evt.CmdDown() && evt.ShiftDown() && evt.GetKeyCode
+        if (evt.CmdDown() && evt.ShiftDown() && evt.GetKeyCode(
