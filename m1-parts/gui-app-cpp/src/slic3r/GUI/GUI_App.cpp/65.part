@@ -1,0 +1,97 @@
+& nt : preset_names_and_types) {
+                    Preset::Type type = nt.type;
+                    Tab* tab = get_tab(type);
+                    std::vector<std::string> selected_options = dlg.get_selected_options(type);
+                    if (type == Preset::TYPE_PRINTER) {
+                        auto it = std::find(selected_options.begin(), selected_options.end(), "extruders_count");
+                        if (it != selected_options.end()) {
+                            // erase "extruders_count" option from the list
+                            selected_options.erase(it);
+                            // cache the extruders count
+                            static_cast<TabPrinter*>(tab)->cache_extruder_cnt();
+                        }
+                    }
+                    tab->cache_config_diff(selected_options);
+                    if (!is_called_from_configwizard)
+                        tab->m_presets->discard_current_changes();
+                }
+                if (is_called_from_configwizard)
+                    *postponed_apply_of_keeped_changes = true;
+                else
+                    apply_keeped_preset_modifications();
+            }
+        }
+    }
+
+    return true;
+}
+
+bool GUI_App::can_load_project()
+{
+    return true;
+}
+
+bool GUI_App::check_print_host_queue()
+{
+    wxString dirty;
+    std::vector<std::pair<std::string, std::string>> jobs;
+    // Get ongoing jobs from dialog
+    mainframe->m_printhost_queue_dlg->get_active_jobs(jobs);
+    if (jobs.empty())
+        return true;
+    // Show dialog
+    wxString job_string = wxString();
+    for (const auto& job : jobs) {
+        job_string += format_wxstr("   %1% : %2% \n", job.first, job.second);
+    }
+    wxString message;
+    message += _(L("The uploads are still ongoing")) + ":\n\n" + job_string +"\n" + _(L("Stop them and continue anyway?"));
+    //wxMessageDialog dialog(mainframe,
+    MessageDialog dialog(mainframe,
+        message,
+        wxString(SLIC3R_APP_NAME) + " - " + _(L("Ongoing uploads")),
+        wxICON_QUESTION | wxYES_NO | wxNO_DEFAULT);
+    if (dialog.ShowModal() == wxID_YES)
+        return true;
+
+    // TODO: If already shown, bring forward
+    mainframe->m_printhost_queue_dlg->Show();
+    return false;
+}
+
+bool GUI_App::checked_tab(Tab* tab)
+{
+    bool ret = true;
+    if (find(tabs_list.begin(), tabs_list.end(), tab) == tabs_list.end() &&
+        find(model_tabs_list.begin(), model_tabs_list.end(), tab) == model_tabs_list.end())
+        ret = false;
+    return ret;
+}
+
+// Update UI / Tabs to reflect changes in the currently loaded presets
+//BBS: add preset combo box re-activate logic
+void GUI_App::load_current_presets(bool active_preset_combox/*= false*/, bool check_printer_presets_ /*= true*/)
+{
+    // check printer_presets for the containing information about "Print Host upload"
+    // and create physical printer from it, if any exists
+    if (check_printer_presets_)
+        check_printer_presets();
+
+    PrinterTechnology printer_technology = preset_bundle->printers.get_edited_preset().printer_technology();
+@@TAB@@this->plater()->set_printer_technology(printer_technology);
+    for (Tab *tab : tabs_list)
+@@TAB@@@@TAB@@if (tab->supports_printer_technology(printer_technology)) {
+@@TAB@@@@TAB@@@@TAB@@if (tab->type() == Preset::TYPE_PRINTER) {
+@@TAB@@@@TAB@@@@TAB@@@@TAB@@static_cast<TabPrinter*>(tab)->update_pages();
+@@TAB@@@@TAB@@@@TAB@@@@TAB@@// Mark the plater to update print bed by tab->load_current_preset() from Plater::on_config_change().
+@@TAB@@@@TAB@@@@TAB@@@@TAB@@this->plater()->force_print_bed_update();
+@@TAB@@@@TAB@@@@TAB@@}
+@@TAB@@@@TAB@@@@TAB@@tab->load_current_preset();
+@@TAB@@@@TAB@@@@TAB@@//BBS: add preset combox re-active logic
+@@TAB@@@@TAB@@@@TAB@@if (active_preset_combox)
+@@TAB@@@@TAB@@@@TAB@@@@TAB@@tab->reactive_preset_combo_box();
+@@TAB@@@@TAB@@}
+    // BBS: model config
+    for (Tab *tab : model_tabs_list)
+@@TAB@@@@TAB@@if (tab->supports_printer_technology(printer_technology)) {
+            tab->rebuild_page_tree();
