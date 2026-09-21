@@ -2659,6 +2659,26 @@ void MainFrame::init_menubar_as_editor()
         append_submenu(fileMenu, export_menu, wxID_ANY, _L("Export"), "");
 
         fileMenu->AppendSeparator();
+        append_menu_item(fileMenu, wxID_ANY, _L("Orca Cloud..."),
+            _L("Log in or out of Orca Cloud (cloud.orcaslicer.com). This is not the Snapmaker account."),
+            [this](wxCommandEvent&) { wxGetApp().request_orca_cloud_login(); }, "", nullptr,
+            []() { return true; }, this);
+        append_menu_item(fileMenu, wxID_ANY, _L("Sync Presets"),
+            _L("Pull and apply the latest presets from Orca Cloud"),
+            [this](wxCommandEvent&) {
+                if (!wxGetApp().is_orca_cloud_login()) {
+                    MessageDialog info_dlg(this, _L("You must be logged in to Orca Cloud to sync presets."),
+                        _L("Sync Presets"), wxOK | wxICON_INFORMATION);
+                    info_dlg.ShowModal();
+                    return;
+                }
+                wxGetApp().restart_sync_user_preset();
+            }, "", nullptr,
+            []() {
+                return wxGetApp().is_orca_cloud_login() && !wxGetApp().app_config->get_stealth_mode();
+            }, this);
+
+        fileMenu->AppendSeparator();
 
 #ifndef __APPLE__
         append_menu_item(fileMenu, wxID_EXIT, _L("Quit"), wxString::Format(_L("Quit")),
@@ -3018,6 +3038,27 @@ void MainFrame::init_menubar_as_editor()
             plater()->get_current_canvas3D()->force_set_focus();
         },
         "", nullptr, []() { return true; }, this);
+
+    append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Orca Cloud..."),
+        _L("Log in or out of Orca Cloud (cloud.orcaslicer.com). This is not the Snapmaker account."),
+        [this](wxCommandEvent&) { wxGetApp().request_orca_cloud_login(); }, "", nullptr,
+        []() { return true; }, this);
+    append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Sync Presets"),
+        _L("Pull and apply the latest presets from Orca Cloud"),
+        [this](wxCommandEvent&) {
+            if (!wxGetApp().is_orca_cloud_login()) {
+                MessageDialog info_dlg(this, _L("You must be logged in to Orca Cloud to sync presets."),
+                    _L("Sync Presets"), wxOK | wxICON_INFORMATION);
+                info_dlg.ShowModal();
+                return;
+            }
+            wxGetApp().restart_sync_user_preset();
+        }, "", nullptr,
+        []() {
+            return wxGetApp().is_orca_cloud_login() && !wxGetApp().app_config->get_stealth_mode();
+        }, this);
 
     m_topbar->AddDropDownSubMenu(helpMenu, _L("Help"));
 
