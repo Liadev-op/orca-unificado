@@ -1,0 +1,126 @@
+imer = std::make_unique<wxTimer>(this, wxID_ANY);
+        Bind(wxEVT_TIMER, &GUI_App::on_token_check_timer, this, m_token_check_timer->GetId());
+    }
+    m_token_check_timer->Start(SM_TOKEN_CHECK_INTERVAL_MS);
+
+    if (!m_sm_login_dialog_showing && sm_login_dlg) {
+        delete sm_login_dlg;
+        sm_login_dlg = nullptr;
+    }
+}
+
+bool GUI_App::sm_is_token_refresh_current(std::size_t refresh_generation) const
+{ return refresh_generation == m_silent_refresh_generation; }
+
+void GUI_App::on_token_check_timer(wxTimerEvent &event)
+{
+    sm_maybe_refresh_login_token();
+}
+
+void GUI_App::sm_stop_silent_token_refresh()
+{
+    ++m_silent_refresh_generation;
+    m_sm_silent_refresh_in_progress = false;
+    if (m_silent_refresh_timeout_timer)
+        m_silent_refresh_timeout_timer->Stop();
+
+    // Drop the hidden login dialog so a late redirect cannot re-login the user.
+    if (!m_sm_login_dialog_showing && sm_login_dlg) {
+        delete sm_login_dlg;
+        sm_login_dlg = nullptr;
+    }
+}
+
+//BBS
+void GUI_App::request_login(bool show_user_info)
+{
+    ShowUserLogin();
+
+    if (show_user_info) {
+        get_login_info();
+    }
+}
+
+void GUI_App::get_login_info()
+{
+    if (m_agent) {
+        if (m_agent->is_user_login()) {
+            std::string login_cmd = m_agent->build_login_cmd();
+            wxString strJS = wxString::Format("window.postMessage(%s)", login_cmd);
+            GUI::wxGetApp().run_script(strJS);
+        }
+        else {
+            m_agent->user_logout();
+            std::string logout_cmd = m_agent->build_logout_cmd();
+            wxString strJS = wxString::Format("window.postMessage(%s)", logout_cmd);
+            GUI::wxGetApp().run_script(strJS);
+        }
+        mainframe->m_webview->SetLoginPanelVisibility(true);
+    }
+}
+
+wxString GUI_App::get_international_url(const wxString& origin_url) {
+
+    wxString baseUrl = origin_url;
+    if (baseUrl.find("?locale=") != std::string::npos) {
+        baseUrl = baseUrl.substr(0, baseUrl.find("?locale="));
+    } else if (baseUrl.find("&locale=") != std::string::npos) {
+        baseUrl = baseUrl.substr(0, baseUrl.find("&locale="));
+    }
+    wxString lang = wxString::FromUTF8(app_config->get_language_code());
+    wxString region = wxString::FromUTF8(app_config->get_country_code());
+    if (region == "Others") {
+        region = "US";
+    }
+
+    string dark_mode = wxGetApp().app_config->get("dark_color_mode");
+
+    if (baseUrl.find("?") != std::string::npos) {
+        return baseUrl + wxString::FromUTF8("&locale=") + lang + wxString::FromUTF8("-") + region +
+               wxString::FromUTF8("&dark_mode=" + dark_mode);
+    } else {
+        return baseUrl + wxString::FromUTF8("?locale=") + lang + wxString::FromUTF8("-") + region +
+               wxString::FromUTF8("&dark_mode=" + dark_mode);
+    }
+
+}
+
+bool GUI_App::is_user_login()
+{
+    if (m_agent) {
+        return m_agent->is_user_login();
+    }
+    return false;
+}
+
+
+bool GUI_App::check_login()
+{
+    bool result = false;
+    if (m_agent) {
+        result = m_agent->is_user_login();
+    }
+
+    if (!result) {
+        ShowUserLogin();
+    }
+    return result;
+}
+
+void GUI_App::request_user_logout()
+{
+    if (m_agent && m_agent->is_user_login()) {
+        // Update data first before showing dialogs
+        m_agent->user_logout(true);
+        m_agent->set_user_selected_machine("");
+        /* delete old user settings */
+        bool     transfer_preset_changes = false;
+        wxString header = _L("Some presets are modified.") + "\n" +
+            _L("You can keep the modified presets to the new project, discard or save changes as new presets.");
+        wxGetApp().check_and_keep_current_preset_changes(_L("User logged out"), header, ActionButtons::KEEP | ActionButtons::SAVE, &transfer_preset_changes);
+
+        m_device_manager->clean_user_info();
+        GUI::wxGetApp().sidebar().load_ams_list({}, {});
+        // Preset UUID folder belongs to Orca Cloud, not the Bambu NetworkAgent session.
+        if (!is_orca_cloud_login()) {
+        
