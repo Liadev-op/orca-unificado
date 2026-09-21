@@ -1,0 +1,68 @@
+r_mqtt");
+    auto enable_ssl_for_ftp = create_item_checkbox(_L("Enable SSL(FTP)"), page, _L("Enable SSL(MQTT)"), 50, "enable_ssl_for_ftp");
+    auto item_internal_developer = create_item_checkbox(_L("Internal developer mode"), page, _L("Internal developer mode"), 50, "internal_developer_mode");
+
+    auto title_log_level = create_item_title(_L("Log Level"), page, _L("Log Level"));
+    auto log_level_list  = std::vector<wxString>{_L("fatal"), _L("error"), _L("warning"), _L("info"), _L("debug"), _L("trace")};
+    auto loglevel_combox = create_item_loglevel_combobox(_L("Log Level"), page, _L("Log Level"), log_level_list);
+
+    auto title_host = create_item_title(_L("Host Setting"), page, _L("Host Setting"));
+    auto radio1     = create_item_radiobox(_L("DEV host: api-dev.bambu-lab.com/v1"), page, wxEmptyString, 50, 1, "dev_host");
+    auto radio2     = create_item_radiobox(_L("QA  host: api-qa.bambu-lab.com/v1"), page, wxEmptyString, 50, 1, "qa_host");
+    auto radio3     = create_item_radiobox(_L("PRE host: api-pre.bambu-lab.com/v1"), page, wxEmptyString, 50, 1, "pre_host");
+    auto radio4     = create_item_radiobox(_L("Product host"), page, wxEmptyString, 50, 1, "product_host");
+
+    if (m_iot_environment_def == ENV_DEV_HOST) {
+        on_select_radio("dev_host");
+    } else if (m_iot_environment_def == ENV_QAT_HOST) {
+        on_select_radio("qa_host");
+    } else if (m_iot_environment_def == ENV_PRE_HOST) {
+        on_select_radio("pre_host");
+    } else if (m_iot_environment_def == ENV_PRODUCT_HOST) {
+        on_select_radio("product_host");
+    }
+
+
+    StateColor btn_bg_white(std::pair<wxColour, int>(AMS_CONTROL_DISABLE_COLOUR, StateColor::Disabled), std::pair<wxColour, int>(AMS_CONTROL_DISABLE_COLOUR, StateColor::Pressed),
+        std::pair<wxColour, int>(AMS_CONTROL_DEF_BLOCK_BK_COLOUR, StateColor::Hovered),
+        std::pair<wxColour, int>(AMS_CONTROL_WHITE_COLOUR, StateColor::Normal));
+    StateColor btn_bd_white(std::pair<wxColour, int>(AMS_CONTROL_WHITE_COLOUR, StateColor::Disabled), std::pair<wxColour, int>(wxColour(38, 46, 48), StateColor::Enabled));
+
+    Button* debug_button = new Button(page, _L("debug save button"));
+    debug_button->SetStyle(ButtonStyle::Regular, ButtonType::Window);
+
+    debug_button->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent &e) {
+        // success message box
+        MessageDialog dialog(this, _L("save debug settings"), _L("DEBUG settings have been saved successfully!"), wxNO_DEFAULT | wxYES_NO | wxICON_INFORMATION);
+        dialog.SetSize(400,-1);
+        switch (dialog.ShowModal()) {
+        case wxID_NO: {
+            //if (m_developer_mode_def != app_config->get("developer_mode")) {
+            //    app_config->set_bool("developer_mode", m_developer_mode_def == "true" ? true : false);
+            //    m_developer_mode_ckeckbox->SetValue(m_developer_mode_def == "true" ? true : false);
+            //}
+            //if (m_internal_developer_mode_def != app_config->get("internal_developer_mode")) {
+            //    app_config->set_bool("internal_developer_mode", m_internal_developer_mode_def == "true" ? true : false);
+            //    m_internal_developer_mode_ckeckbox->SetValue(m_internal_developer_mode_def == "true" ? true : false);
+            //}
+
+            if (m_backup_interval_def != m_backup_interval_time) { m_backup_interval_textinput->GetTextCtrl()->SetValue(m_backup_interval_def); }
+
+            if (m_iot_environment_def == ENV_DEV_HOST) {
+                on_select_radio("dev_host");
+            } else if (m_iot_environment_def == ENV_QAT_HOST) {
+                on_select_radio("qa_host");
+            } else if (m_iot_environment_def == ENV_PRE_HOST) {
+                on_select_radio("pre_host");
+            } else if (m_iot_environment_def == ENV_PRODUCT_HOST) {
+                on_select_radio("product_host");
+            }
+
+            break;
+        }
+
+        case wxID_YES: {
+            // bbs  domain changed
+            auto param = get_select_radio(1);
+
+            
