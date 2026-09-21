@@ -1,0 +1,81 @@
+[BBL_JSON_KEY_UPDATE_TIME];
+                if (!update_time_str.empty())
+                    update_time = std::atoll(update_time_str.c_str());
+            } else {
+                BOOST_LOG_TRIVIAL(trace) << "[sync_preset]create: request_setting_id failed, http code "<<http_code;
+                // do not post new preset this time if http code >= 400
+                if (http_code >= 400) {
+                    result = 0;
+                    updated_info = "hold";
+                }
+                else
+                    result = -1;
+            }
+        } else {
+            BOOST_LOG_TRIVIAL(trace) << "[sync_preset]create: can not generate differed preset";
+        }
+    } else if (preset->sync_info.compare("update") == 0) {
+        if (!setting_id.empty()) {
+            int ret = preset_bundle->get_differed_values_to_update(*preset, values_map);
+            if (!ret) {
+                if (auto iter = values_map.find(BBL_JSON_KEY_BASE_ID); iter != values_map.end() && iter->second == setting_id) {
+                    //clear the setting_id in this case ???
+                    setting_id.clear();
+                    result = 0;
+                }
+                else {
+                    result = (m_orca_cloud && m_orca_cloud->is_user_login())
+                        ? m_orca_cloud->put_setting(setting_id, preset->name, &values_map, &http_code)
+                        : m_agent->put_setting(setting_id, preset->name, &values_map, &http_code);
+                    if (http_code >= 400) {
+                        result = 0;
+                        updated_info = "hold";
+                        BOOST_LOG_TRIVIAL(error) << "[sync_preset] put setting_id = " << setting_id << " failed, http_code = " << http_code;
+                    } else {
+                        auto update_time_str = values_map[BBL_JSON_KEY_UPDATE_TIME];
+                        if (!update_time_str.empty())
+                            update_time = std::atoll(update_time_str.c_str());
+                    }
+                }
+
+            }
+            else {
+                BOOST_LOG_TRIVIAL(trace) << "[sync_preset]update: can not generate differed key-values, we need to skip this preset "<< preset->name;
+                result = 0;
+            }
+        }
+        else {
+            //clear the sync_info
+            result = 0;
+        }
+    }
+
+    if (http_code >= 400 && values_map["code"] == "14") { // Limit
+        m_create_preset_blocked[preset->type] = true;
+        CallAfter([this] {
+            plater()->get_notification_manager()->push_notification(NotificationType::BBLUserPresetExceedLimit);
+            static bool dialog_notified = false;
+            if (dialog_notified)
+                return;
+            dialog_notified = true;
+            if (mainframe == nullptr)
+                return;
+            auto msg = _L("The number of user presets cached in the cloud has exceeded the upper limit, newly created user presets can only be used locally.");
+            MessageDialog(mainframe, msg, _L("Sync user presets"), wxICON_WARNING | wxOK).ShowModal();
+        });
+        return; // this error not need hold, and should not hold
+    }
+
+    // update sync_info preset info in file
+    if (result == 0) {
+        //PresetBundle* preset_bundle = wxGetApp().preset_bundle;
+        if (!this->preset_bundle) return;
+
+        BOOST_LOG_TRIVIAL(trace) << "sync_preset: sync operation: " << preset->sync_info << " success! preset = " << preset->name;
+        if (preset->type == Preset::Type::TYPE_FILAMENT) {
+            preset_bundle->filaments.set_sync_info_and_save(preset->name, setting_id, updated_info, update_time);
+        } else if (preset->type == Preset::Type::TYPE_PRINT) {
+            preset_bundle->prints.set_sync_info_and_save(preset->name, setting_id, updated_info, update_time);
+        } else if (preset->type == Preset::Type::TYPE_PRINTER) {
+            preset_bundle->printers.set_sync_info_and_save(preset->name, setting_id, updated_info, update_time);
+       

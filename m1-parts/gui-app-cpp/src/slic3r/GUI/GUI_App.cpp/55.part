@@ -1,0 +1,91 @@
+ }
+    }
+}
+
+void GUI_App::start_sync_user_preset(bool with_progress_dlg)
+{
+    if (app_config->get_stealth_mode())
+        return;
+
+    const bool orca_logged = is_orca_cloud_login();
+    if (!orca_logged && (!m_agent || !m_agent->is_user_login())) return;
+
+    // has already start sync
+    if (m_user_sync_token) return;
+
+    ProgressFn progressFn;
+    WasCancelledFn cancelFn;
+    std::function<void(bool)> finishFn;
+
+    BOOST_LOG_TRIVIAL(info) << "start_sync_service...";
+    // BBS
+    m_user_sync_token.reset(new int(0));
+    if (with_progress_dlg) {
+        auto dlg = new ProgressDialog(_L("Loading"), "", 100, this->mainframe, wxPD_AUTO_HIDE | wxPD_APP_MODAL | wxPD_CAN_ABORT);
+        dlg->Update(0, _L("Loading user preset"));
+        progressFn = [this, dlg](int percent) {
+            CallAfter([=]{
+                dlg->Update(percent, _L("Loading user preset"));
+            });
+        };
+        cancelFn = [this, dlg]() {
+            return m_is_closing || dlg->WasCanceled();
+        };
+        finishFn = [this, userid = (m_orca_cloud && m_orca_cloud->is_user_login() ? m_orca_cloud->get_user_id() : (m_agent ? m_agent->get_user_id() : std::string())), dlg, t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
+            CallAfter([=]{
+                dlg->Destroy();
+                if (ok && t.lock() == m_user_sync_token) reload_settings();
+            });
+        };
+    }
+    else {
+        finishFn = [this, userid = (m_orca_cloud && m_orca_cloud->is_user_login() ? m_orca_cloud->get_user_id() : (m_agent ? m_agent->get_user_id() : std::string())), t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
+            CallAfter([=] {
+                if (ok && t.lock() == m_user_sync_token) reload_settings();
+            });
+        };
+    }
+
+    m_sync_update_thread = Slic3r::create_thread(
+        [this, progressFn, cancelFn, finishFn, t = std::weak_ptr<int>(m_user_sync_token)] {
+            // get setting list, update setting list
+            std::string version = preset_bundle->get_vendor_profile_version(PresetBundle::SM_BUNDLE).to_string();
+            auto need_sync_fn = [this](auto info) {
+                auto type = info[BBL_JSON_KEY_TYPE];
+                auto name = info[BBL_JSON_KEY_NAME];
+                auto setting_id = info[BBL_JSON_KEY_SETTING_ID];
+                auto update_time_str = info[BBL_JSON_KEY_UPDATE_TIME];
+                long long update_time = 0;
+                if (!update_time_str.empty())
+                    update_time = std::atoll(update_time_str.c_str());
+                if (type == "filament") {
+                    return preset_bundle->filaments.need_sync(name, setting_id, update_time);
+                } else if (type == "print") {
+                    return preset_bundle->prints.need_sync(name, setting_id, update_time);
+                } else if (type == "printer") {
+                    return preset_bundle->printers.need_sync(name, setting_id, update_time);
+                } else {
+                    return true;
+                }
+            };
+            int ret = -1;
+            if (m_orca_cloud && m_orca_cloud->is_user_login())
+                ret = m_orca_cloud->get_setting_list2(version, need_sync_fn, progressFn, cancelFn);
+            else if (m_agent)
+                ret = m_agent->get_setting_list2(version, need_sync_fn, progressFn, cancelFn);
+            finishFn(ret == 0);
+
+            int count = 0, sync_count = 0;
+            std::vector<Preset> presets_to_sync;
+            while (!t.expired()) {
+                count++;
+                if (count % 20 == 0) {
+                    const bool cloud_ok = (m_orca_cloud && m_orca_cloud->is_user_login()) || (m_agent && m_agent->is_user_login());
+                    if (!cloud_ok) {
+                            continue;
+                        }
+                        //sync preset
+                        if (!preset_bundle) continue;
+
+                        int total_count = 0;
+                        sync_count = preset_bundle->
