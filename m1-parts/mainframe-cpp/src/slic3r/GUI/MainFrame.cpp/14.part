@@ -1,0 +1,95 @@
+ pfsne array
+            &shCNE);                                                                // Array of SHChangeNotifyEntry structures that
+                                                                                    // contain the notifications. This array should
+                                                                                    // always be set to one when calling SHChnageNotifyRegister
+                                                                                    // or SHChangeNotifyDeregister will not work properly.
+        assert(m_ulSHChangeNotifyRegister != 0);    // Shell notification failed
+    } else {
+        // Failed to get desktop location
+        assert(false);
+    }
+
+    {
+        static constexpr int device_count = 1;
+        RAWINPUTDEVICE devices[device_count] = { 0 };
+        // multi-axis mouse (SpaceNavigator, etc.)
+        devices[0].usUsagePage = 0x01;
+        devices[0].usUsage = 0x08;
+        if (! RegisterRawInputDevices(devices, device_count, sizeof(RAWINPUTDEVICE)))
+            BOOST_LOG_TRIVIAL(error) << "RegisterRawInputDevices failed";
+    }
+
+    // Register for Windows session change notifications (lock/unlock)
+    if (!::WTSRegisterSessionNotification(this->GetHWND(), NOTIFY_FOR_THIS_SESSION))
+        BOOST_LOG_TRIVIAL(error) << "WTSRegisterSessionNotification failed";
+
+    // Register for console display state notifications (screen on/off/dimmed)
+    if (!::RegisterPowerSettingNotification(this->GetHWND(), &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE))
+        BOOST_LOG_TRIVIAL(error) << "RegisterPowerSettingNotification failed";
+}
+#endif // _WIN32
+
+void MainFrame::create_preset_tabs()
+{
+    wxGetApp().update_label_colours_from_appconfig();
+
+    //BBS: GUI refactor
+    //m_param_panel = new ParamsPanel(m_tabpanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBK_LEFT | wxTAB_TRAVERSAL);
+    m_param_dialog = new ParamsDialog(m_plater);
+
+    add_created_tab(new TabPrint(m_param_panel), "cog");
+    add_created_tab(new TabPrintPlate(m_param_panel), "cog");
+    add_created_tab(new TabPrintObject(m_param_panel), "cog");
+    add_created_tab(new TabPrintPart(m_param_panel), "cog");
+    add_created_tab(new TabPrintLayer(m_param_panel), "cog");
+    add_created_tab(new TabFilament(m_param_dialog->panel()), "spool");
+    /* BBS work around to avoid appearance bug */
+    //add_created_tab(new TabSLAPrint(m_param_panel));
+    //add_created_tab(new TabSLAMaterial(m_param_panel));
+    add_created_tab(new TabPrinter(m_param_dialog->panel()), "printer");
+
+    m_param_panel->rebuild_panels();
+    m_param_dialog->panel()->rebuild_panels();
+    //m_tabpanel->AddPage(m_param_panel, "Parameters", "notebook_presets_active");
+    //m_tabpanel->InsertPage(tpSettings, m_param_panel, _L("Parameters"), std::string("cog"));
+}
+
+void MainFrame::add_created_tab(Tab* panel,  const std::string& bmp_name /*= ""*/)
+{
+    panel->create_preset_tab();
+
+    if (panel->type() == Preset::TYPE_PLATE) {
+        wxGetApp().tabs_list.pop_back();
+        wxGetApp().plate_tab = panel;
+    }
+    // BBS: model config
+    if (panel->type() == Preset::TYPE_MODEL) {
+        wxGetApp().tabs_list.pop_back();
+        wxGetApp().model_tabs_list.push_back(panel);
+    }
+}
+
+bool MainFrame::is_active_and_shown_tab(wxPanel* panel)
+{
+    if (panel == m_param_panel)
+        panel = m_plater;
+    else
+        return m_param_dialog->IsShown();
+
+    if (m_tabpanel->GetCurrentPage() != panel)
+        return false;
+    return true;
+}
+
+bool MainFrame::can_start_new_project() const
+{
+    /*return m_plater && (!m_plater->get_project_filename(".3mf").IsEmpty() ||
+                        GetTitle().StartsWith('*')||
+                        wxGetApp().has_current_preset_changes() ||
+                        !m_plater->model().objects.empty());*/
+    return (m_plater && !m_plater->is_background_process_slicing());
+}
+
+bool MainFrame::can_open_project() const
+{
+    return (m_plater && !m_plater->is_background_process_slicing(
