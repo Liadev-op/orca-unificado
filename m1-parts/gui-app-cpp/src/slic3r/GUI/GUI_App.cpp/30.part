@@ -56,7 +56,7 @@
     snap::SnapLogConfig snap_cfg;
     std::string snap_cc   = app_config ? app_config->get_country_code() : "";
     snap_cfg.gateway_base = (snap_cc.find("CN") != std::string::npos) ?
-                                "https://api.snapmakercn"
+                                "https://api.snapmaker.cn"
                                 :
                                 "https://api.snapmaker.com";
     snap_cfg.hmac_secret = SNAP_LOG_HMAC_SECRET;
