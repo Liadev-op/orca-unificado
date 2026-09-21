@@ -1,0 +1,102 @@
+/";
+    }
+    else if (country_code == "ENV_CN_QA") {
+        url = "https://makerhub-qa.bambu-lab.com/";
+    }
+    else if (country_code == "ENV_CN_PRE") {
+        url = "https://makerhub-pre.bambu-lab.com/";
+    }
+    else {
+        url = "https://makerworld.com/";
+    }
+
+    return url;
+}
+
+
+std::string GUI_App::get_plugin_url(std::string name, std::string country_code)
+{
+    std::string url = get_http_url(country_code);
+
+    std::string curr_version = NetworkAgent::use_legacy_network ? BAMBU_NETWORK_AGENT_VERSION_LEGACY : BAMBU_NETWORK_AGENT_VERSION;
+    std::string using_version = curr_version.substr(0, 9) + "00";
+    if (name == "cameratools")
+        using_version = curr_version.substr(0, 6) + "00.00";
+    url += (boost::format("?slicer/%1%/cloud=%2%") % name % using_version).str();
+    //url += (boost::format("?slicer/plugins/cloud=%1%") % "01.01.00.00").str();
+    return url;
+}
+
+static std::string decode(std::string const& extra, std::string const& path = {}) {
+    char const* p = extra.data();
+    char const* e = p + extra.length();
+    while (p + 4 < e) {
+        boost::uint16_t len = ((boost::uint16_t)p[2]) | ((boost::uint16_t)p[3] << 8);
+        if (p[0] == '\x75' && p[1] == '\x70' && len >= 5 && p + 4 + len < e && p[4] == '\x01') {
+            return std::string(p + 9, p + 4 + len);
+        }
+        else {
+            p += 4 + len;
+        }
+    }
+    return Slic3r::decode_path(path.c_str());
+}
+
+int GUI_App::download_plugin(std::string name, std::string package_name, InstallProgressFn pro_fn, WasCancelledFn cancel_fn)
+{
+    int result = 0;
+    json j;
+    std::string err_msg;
+
+    // get country_code
+    AppConfig* app_config = wxGetApp().app_config;
+    if (!app_config) {
+        j["result"] = "failed";
+        j["error_msg"] = "app_config is nullptr";
+        return -1;
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: enter";
+    m_networking_cancel_update = false;
+    // get temp path
+    fs::path target_file_path = (fs::temp_directory_path() / package_name);
+    fs::path tmp_path = target_file_path;
+    tmp_path += format(".%1%%2%", get_current_pid(), ".tmp");
+
+#if defined(__WINDOWS__)
+    if (is_running_on_arm64() && !NetworkAgent::use_legacy_network) {
+        //set to arm64 for plugins
+        std::map<std::string, std::string> current_headers = Slic3r::Http::get_extra_headers();
+        current_headers["X-BBL-OS-Type"] = "windows_arm";
+
+        Slic3r::Http::set_extra_headers(current_headers);
+        BOOST_LOG_TRIVIAL(info) << boost::format("download_plugin: set X-BBL-OS-Type to windows_arm");
+    }
+#endif
+
+    // get_url
+    std::string  url = get_plugin_url(name, app_config->get_country_code());
+    std::string download_url;
+    Slic3r::Http http_url = Slic3r::Http::get(url);
+    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: check the plugin from " << url;
+    http_url.timeout_connect(TIMEOUT_CONNECT)
+        .timeout_max(TIMEOUT_RESPONSE)
+        .on_complete(
+        [&download_url](std::string body, unsigned status) {
+            try {
+                json j = json::parse(body);
+                std::string message = j["message"].get<std::string>();
+
+                if (message == "success") {
+                    json resource = j.at("resources");
+                    if (resource.is_array()) {
+                        for (auto iter = resource.begin(); iter != resource.end(); iter++) {
+                            Semver version;
+                            std::string url;
+                            std::string type;
+                            std::string vendor;
+                            std::string description;
+                            for (auto sub_iter = iter.value().begin(); sub_iter != iter.value().end(); sub_iter++) {
+                                if (boost::iequals(sub_iter.key(), "type")) {
+                                    type = sub_iter.value();
+                                    BOOST_LOG_TRIVIAL(info) << "[download_plugin]: get version of settings's type, " << sub_i
