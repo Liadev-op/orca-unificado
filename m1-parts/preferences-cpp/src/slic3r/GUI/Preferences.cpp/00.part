@@ -1,0 +1,115 @@
+#include "Preferences.hpp"
+#include "OptionsGroup.hpp"
+#include "GUI_App.hpp"
+#include "MainFrame.hpp"
+#include "Plater.hpp"
+#include "MsgDialog.hpp"
+#include "I18N.hpp"
+#include "libslic3r/AppConfig.hpp"
+#include <wx/language.h>
+#include <wx/notebook.h>
+#include "Notebook.hpp"
+#include "OG_CustomCtrl.hpp"
+#include "wx/graphics.h"
+#include "Widgets/CheckBox.hpp"
+#include "Widgets/ComboBox.hpp"
+#include "Widgets/RadioBox.hpp"
+#include "Widgets/TextInput.hpp"
+#include <wx/listimpl.cpp>
+#include <wx/display.h>
+#include <map>
+#include <memory>
+
+#include "sentry_wrapper/SentryWrapper.hpp"
+#include "SSWCP.hpp"
+
+#ifdef __WINDOWS__
+#ifdef _MSW_DARK_MODE
+#include "dark_mode.hpp"
+#endif // _MSW_DARK_MODE
+#endif //__WINDOWS__
+
+namespace Slic3r { namespace GUI {
+
+WX_DEFINE_LIST(RadioSelectorList);
+wxDEFINE_EVENT(EVT_PREFERENCES_SELECT_TAB, wxCommandEvent);
+
+
+class MyscrolledWindow : public wxScrolledWindow {
+public:
+    MyscrolledWindow(wxWindow* parent,
+        wxWindowID id = wxID_ANY,
+        const wxPoint& pos = wxDefaultPosition,
+        const wxSize& size = wxDefaultSize,
+        long style = wxVSCROLL) : wxScrolledWindow(parent, id, pos, size, style) {}
+
+    bool ShouldScrollToChildOnFocus(wxWindow* child) override { return false; }
+};
+
+
+wxBoxSizer *PreferencesDialog::create_item_title(wxString title, wxWindow *parent, wxString tooltip)
+{
+    wxBoxSizer *m_sizer_title = new wxBoxSizer(wxHORIZONTAL);
+
+    auto m_title = new wxStaticText(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize, 0);
+    m_title->SetForegroundColour(DESIGN_GRAY800_COLOR);
+    m_title->SetFont(::Label::Head_13);
+    m_title->Wrap(-1);
+    //m_title->SetToolTip(tooltip);
+
+    auto m_line = new wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, 1), wxTAB_TRAVERSAL);
+    m_line->SetBackgroundColour(DESIGN_GRAY400_COLOR);
+
+    m_sizer_title->Add(m_title, 0, wxALIGN_CENTER | wxALL, 3);
+    m_sizer_title->Add(0, 0, 0,  wxLEFT, 9);
+    //m_sizer_title->Add(m_line, 0, wxEXPAND, 0);
+    wxBoxSizer *sizer_line = new wxBoxSizer(wxVERTICAL);
+    sizer_line->Add( m_line, 0, wxEXPAND, 0 );
+    m_sizer_title->Add( sizer_line, 1, wxALIGN_CENTER, 0 );
+    //m_sizer_title->Add( 0, 0, 0, wxEXPAND|wxLEFT, 80 );
+
+    return m_sizer_title;
+}
+
+std::tuple<wxBoxSizer*, ComboBox*> PreferencesDialog::create_item_combobox_base(wxString title, wxWindow* parent, wxString tooltip, std::string param, std::vector<wxString> vlist, unsigned int current_index)
+{
+    wxBoxSizer *m_sizer_combox = new wxBoxSizer(wxHORIZONTAL);
+    m_sizer_combox->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
+
+    auto combo_title = new wxStaticText(parent, wxID_ANY, title, wxDefaultPosition, DESIGN_TITLE_SIZE, 0);
+    combo_title->SetForegroundColour(DESIGN_GRAY900_COLOR);
+    combo_title->SetFont(::Label::Body_13);
+    combo_title->SetToolTip(tooltip);
+    combo_title->Wrap(-1);
+    m_sizer_combox->Add(combo_title, 0, wxALIGN_CENTER | wxALL, 3);
+
+    auto combobox = new ::ComboBox(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, DESIGN_LARGE_COMBOBOX_SIZE, 0, nullptr, wxCB_READONLY);
+    combobox->SetFont(::Label::Body_13);
+    combobox->GetDropDown().SetFont(::Label::Body_13);
+
+    std::vector<wxString>::iterator iter;
+    for (iter = vlist.begin(); iter != vlist.end(); iter++) {
+        combobox->Append(*iter);
+    }
+
+    combobox->SetSelection(current_index);
+
+    m_sizer_combox->Add(combobox, 0, wxALIGN_CENTER, 0);
+
+    return {m_sizer_combox, combobox};
+}
+
+wxBoxSizer* PreferencesDialog::create_item_combobox(wxString title, wxWindow* parent, wxString tooltip, std::string param, std::vector<wxString> vlist)
+{
+    unsigned int current_index = 0;
+
+    auto current_setting = app_config->get(param);
+    if (!current_setting.empty()) {
+        current_index = atoi(current_setting.c_str());
+    }
+
+    auto [sizer, combobox] = create_item_combobox_base(title, parent, tooltip, param, vlist, current_index);
+
+    //// save config
+    combobox->GetDropDown().Bind(wxEVT_COMBOBOX, [this, param](wxCommandEvent& e) {
+ 
