@@ -1,0 +1,93 @@
+pty();
+                                m_device_manager->set_selected_machine("", true);
+                                if (!already_disconnected) {
+                                    wxString text;
+                                    if (msg == "5") {
+                                        obj->set_access_code("");
+                                        obj->erase_user_access_code();
+                                        text = wxString::Format(_L("Incorrect password"));
+                                        wxGetApp().show_dialog(text);
+                                    } else {
+                                        text = wxString::Format(_L("Connect %s failed! [SN:%s, code=%s]"), from_u8(obj->dev_name), obj->dev_id, msg);
+                                        wxGetApp().show_dialog(text);
+                                    }
+                                }
+                                event.SetInt(-1);
+                            } else if (state == ConnectStatus::ConnectStatusLost) {
+                                m_device_manager->set_selected_machine("", true);
+                                event.SetInt(-1);
+                                BOOST_LOG_TRIVIAL(info) << "set_on_local_connect_fn: state = lost";
+                            } else {
+                                event.SetInt(-1);
+                                BOOST_LOG_TRIVIAL(info) << "set_on_local_connect_fn: state = " << state;
+                            }
+
+                            obj->set_lan_mode_connection_state(false);
+                        }
+                        else {
+                            if (state == ConnectStatus::ConnectStatusOk) {
+                                event.SetInt(1);
+                                event.SetString(obj->dev_id);
+                            }
+                            else if(msg == "5") {
+                                event.SetInt(5);
+                                event.SetString(obj->dev_id);
+                            }
+                            else {
+                                event.SetInt(-2);
+                                event.SetString(obj->dev_id);
+                            }
+                        }
+                    }
+                    if (wxGetApp().plater()->get_select_machine_dialog()) {
+                        wxPostEvent(wxGetApp().plater()->get_select_machine_dialog(), event);
+                    }
+                });
+            }
+        );
+
+        auto message_arrive_fn = [this](std::string dev_id, std::string msg) {
+            if (m_is_closing) {
+                return;
+            }
+            CallAfter([this, dev_id, msg] {
+                if (m_is_closing)
+                    return;
+                this->process_network_msg(dev_id, msg);
+
+                MachineObject* obj = this->m_device_manager->get_user_machine(dev_id);
+                if (obj) {
+                    obj->is_ams_need_update = false;
+
+                    auto sel = this->m_device_manager->get_selected_machine();
+
+                    if (sel && sel->dev_id == dev_id) {
+                        obj->parse_json(msg);
+                    }
+                    else {
+                        obj->parse_json(msg, true);
+                    }
+
+
+                    if (!this->is_enable_multi_machine()) {
+                        if ((sel == obj || sel == nullptr) && obj->is_ams_need_update) {
+                            GUI::wxGetApp().sidebar().load_ams_list(obj->dev_id, obj);
+                        }
+                    }
+                }
+            });
+        };
+
+        m_agent->set_on_message_fn(message_arrive_fn);
+
+        auto user_message_arrive_fn = [this](std::string user_id, std::string msg) {
+            if (m_is_closing) {
+                return;
+            }
+            CallAfter([this, user_id, msg] {
+                if (m_is_closing)
+                    return;
+
+                //check user
+                if (user_id == m_agent->get_user_id()) {
+ 
