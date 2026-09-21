@@ -1,0 +1,96 @@
+ (m_internal_developer_mode_def == "true") {
+                Slic3r::GUI::wxGetApp().update_internal_development();
+                Slic3r::GUI::wxGetApp().mainframe->show_log_window();
+            } else {
+                Slic3r::GUI::wxGetApp().update_internal_development();
+            }
+        }
+
+        e.Skip();
+    });
+
+    //// for debug mode
+    if (param == "developer_mode") { m_developer_mode_ckeckbox = checkbox; }
+    if (param == "internal_developer_mode") { m_internal_developer_mode_ckeckbox = checkbox; }
+
+    if (param == "legacy_networking") {
+        m_legacy_networking_ckeckbox = checkbox;
+        bool pbool = app_config->get_bool("installed_networking");
+        checkbox->Enable(pbool);
+    }
+
+
+    checkbox->SetToolTip(tooltip);
+    return m_sizer_checkbox;
+}
+
+wxBoxSizer* PreferencesDialog::create_item_button(
+    wxString title, wxString title2, wxWindow* parent, wxString tooltip, wxString tooltip2, std::function<void()> onclick, bool button_on_left/* = false*/)
+{
+    wxBoxSizer *m_sizer_checkbox = new wxBoxSizer(wxHORIZONTAL);
+
+    m_sizer_checkbox->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
+    auto m_staticTextPath = new wxStaticText(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    m_staticTextPath->SetMaxSize(wxSize(FromDIP(240), -1));
+    m_staticTextPath->SetForegroundColour(DESIGN_GRAY900_COLOR);
+    m_staticTextPath->SetFont(::Label::Body_13);
+    m_staticTextPath->Wrap(-1);
+    m_staticTextPath->SetToolTip(tooltip);
+
+    auto m_button_download = new Button(parent, title2);
+    m_button_download->SetStyle(ButtonStyle::Regular, ButtonType::Window);
+    m_button_download->SetToolTip(tooltip2);
+
+    m_button_download->Bind(wxEVT_BUTTON, [this, onclick](auto &e) { onclick(); });
+
+    if (button_on_left) {
+        m_sizer_checkbox->Add(m_button_download, 0, wxALL, FromDIP(5));
+        m_sizer_checkbox->Add(m_staticTextPath, 0, wxALIGN_CENTER_VERTICAL | wxALL, FromDIP(5));
+    } else {
+        m_sizer_checkbox->Add(m_staticTextPath, 0, wxALIGN_CENTER_VERTICAL | wxALL, FromDIP(5));
+        m_sizer_checkbox->Add(m_button_download, 0, wxALL, FromDIP(5));
+    }
+
+    return m_sizer_checkbox;
+}
+
+wxWindow* PreferencesDialog::create_item_downloads(wxWindow* parent, int padding_left, std::string param)
+{
+    wxString download_path = wxString::FromUTF8(app_config->get("download_path"));
+    auto item_panel = new wxWindow(parent, wxID_ANY);
+    item_panel->SetBackgroundColour(*wxWHITE);
+    wxBoxSizer* m_sizer_checkbox = new wxBoxSizer(wxHORIZONTAL);
+
+    m_sizer_checkbox->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
+    auto m_staticTextPath = new wxStaticText(item_panel, wxID_ANY, download_path, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    //m_staticTextPath->SetMaxSize(wxSize(FromDIP(440), -1));
+    m_staticTextPath->SetForegroundColour(DESIGN_GRAY600_COLOR);
+    m_staticTextPath->SetFont(::Label::Body_13);
+    m_staticTextPath->Wrap(-1);
+
+    auto m_button_download = new Button(item_panel, _L("Browse"));
+    m_button_download->SetStyle(ButtonStyle::Regular, ButtonType::Window);
+
+    m_button_download->Bind(wxEVT_BUTTON, [this, m_staticTextPath, item_panel](auto& e) {
+        wxString defaultPath = wxT("/");
+        wxDirDialog dialog(this, _L("Choose Download Directory"), defaultPath, wxDD_NEW_DIR_BUTTON);
+
+        if (dialog.ShowModal() == wxID_OK) {
+            wxString download_path = dialog.GetPath();
+            std::string download_path_str = download_path.ToUTF8().data();
+            app_config->set("download_path", download_path_str);
+            m_staticTextPath->SetLabelText(download_path);
+            item_panel->Layout();
+        }
+        });
+
+    m_sizer_checkbox->Add(m_staticTextPath, 0, wxALIGN_CENTER_VERTICAL | wxALL, FromDIP(5));
+    m_sizer_checkbox->Add(m_button_download, 0, wxALL, FromDIP(5));
+
+    item_panel->SetSizer(m_sizer_checkbox);
+    item_panel->Layout();
+
+    return item_panel;
+}
+
+wxWindow *PreferencesDialog ::create_item_radiobox(wxString title, 
