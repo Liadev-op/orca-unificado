@@ -1,0 +1,90 @@
+==============================================
+
+bool OrcaCloudServiceAgent::set_user_session(const std::string& token,
+                                     const std::string& user_id,
+                                     const std::string& username,
+                                     const std::string& nickname,
+                                     const std::string& avatar,
+                                     const std::string& refresh_token,
+                                     bool persist)
+{
+    std::chrono::system_clock::time_point exp_tp{};
+    decode_jwt_expiry(token, exp_tp);
+
+    {
+        std::lock_guard<std::mutex> lock(session_mutex);
+        session.access_token = token;
+        session.refresh_token = refresh_token;
+        session.user_id = user_id;
+        session.user_name = username;
+        session.user_nickname = nickname;
+        session.user_avatar = avatar;
+        session.expires_at = exp_tp;
+        session.logged_in = true;
+    }
+
+    if (persist) {
+        // Store user session on disk to not block use from using
+        // an already logged in account if internet is not available.
+        // Don't store access token though, we should always refresh it
+        // once user is back online.
+        json sec             = json::object();
+        sec["refresh_token"] = refresh_token;
+        sec["user_id"]       = user_id;
+        sec["username"]      = username;
+        sec["nickname"]      = nickname;
+        persist_user_secret(sec.dump());
+    }
+
+    // Set per-user sync state path
+    if (!config_dir.empty() && !user_id.empty()) {
+        boost::filesystem::path user_dir = boost::filesystem::path(config_dir) / "user" / user_id;
+        if (!boost::filesystem::exists(user_dir)) {
+            boost::filesystem::create_directories(user_dir);
+        }
+        sync_state_path = (user_dir / ORCA_SYNC_STATE_FILE).string();
+        load_sync_state();
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "OrcaCloudServiceAgent: set_user_session - user_id=" << user_id << ", username=" << username;
+    return true;
+}
+
+bool OrcaCloudServiceAgent::set_user_session(const json& session_json, bool notify_login)
+{
+    std::string access_token = get_json_string_field(session_json, "access_token");
+    if (access_token.empty()) {
+        access_token = get_json_string_field(session_json, "token");
+    }
+    std::string refresh_token = get_json_string_field(session_json, "refresh_token");
+
+    std::string user_id, username, nickname, avatar;
+    if (session_json.contains("user") && session_json["user"].is_object()) {
+        // Nested format (Orca cloud / GoTrue response)
+        const auto& user = session_json["user"];
+        user_id = get_json_string_field(user, "id");
+
+        if (user.contains("user_metadata") && user["user_metadata"].is_object()) {
+            const auto& meta = user["user_metadata"];
+            username = get_json_string_field(meta, "username"); // Orca Cloud's unique username
+
+            // Orca Cloud's primary display name field is display_name.
+            // Fallback to different names from different providers if display_name is not set.
+            nickname = resolve_display_name(
+                get_json_string_field(meta, "display_name"),
+                get_json_string_field(meta, "nickname"),
+                get_json_string_field(meta, "full_name"),
+                get_json_string_field(meta, "name"),
+                username);
+            avatar = get_json_string_field(meta, "avatar_url");
+        }
+    } else {
+        // Flat format (WebView direct token flow)
+        user_id = get_json_string_field(session_json, "user_id");
+        username = get_json_string_field(session_json, "username");
+        nickname = resolve_display_name(
+            get_json_string_field(session_json, "display_name"),
+            get_json_string_field(session_json, "nickname"),
+            get_json_string_field(session_json, "full_name"),
+            get_json_string_field(session_json, "name"),
+            username)

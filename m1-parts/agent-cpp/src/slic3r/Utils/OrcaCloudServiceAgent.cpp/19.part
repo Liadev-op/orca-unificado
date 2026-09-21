@@ -1,0 +1,107 @@
+;
+        avatar = get_json_string_field(session_json, "avatar");
+    }
+
+    if (access_token.empty() || user_id.empty()) {
+        BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: session payload missing access_token or user id";
+        return false;
+    }
+
+    bool success = set_user_session(access_token, user_id, username, nickname, avatar, refresh_token);
+    if (success && notify_login && on_login_complete_handler) {
+        on_login_complete_handler(true, user_id);
+    }
+    return success;
+}
+
+void OrcaCloudServiceAgent::clear_session()
+{
+    {
+        std::lock_guard<std::mutex> lock(session_mutex);
+        session = SessionInfo{};
+    }
+    clear_user_secret();
+}
+
+// ============================================================================
+// HTTP Helpers
+// ============================================================================
+
+RefreshResult OrcaCloudServiceAgent::attempt_refresh_after_unauthorized(const std::string& reason)
+{
+    RefreshResult r = refresh_from_storage(reason, false);
+    if (r != RefreshResult::Transient) return r;  // Success or AuthRejected: decided, no retry
+
+    // Only a transient (network/server) failure is worth retrying.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    r = refresh_from_storage(reason + "_retry", false);
+
+    if (r == RefreshResult::Transient)
+        BOOST_LOG_TRIVIAL(warning) << "[auth] event=refresh result=transient source=" << reason << " action=keep_session";
+    else if (r == RefreshResult::AuthRejected)
+        BOOST_LOG_TRIVIAL(warning) << "[auth] event=refresh result=rejected source=" << reason << " action=logout";
+    return r;
+}
+
+std::map<std::string, std::string> OrcaCloudServiceAgent::data_headers()
+{
+    std::scoped_lock lock(state_mutex, headers_mutex);
+    auto headers = auth_headers;
+    for (const auto& pair : extra_headers) {
+        headers[pair.first] = pair.second;
+    }
+    return headers;
+}
+
+bool OrcaCloudServiceAgent::resolve_unauthorized(HttpResult& res,
+        const std::function<HttpResult()>& perform, const std::string& reason)
+{
+    if (res.status != 401)
+        return false;
+
+    RefreshResult rr = attempt_refresh_after_unauthorized(reason);
+    if (rr == RefreshResult::Success) {
+        res = perform();   // refreshed: retry the original request with the new token
+        return false;
+    }
+
+    // Transient (no connection / 5xx / 429 / ambiguous): keep the session and token,
+    // suppress the auth error so the GUI does not log the user out.
+    // AuthRejected (refresh token genuinely rejected): let the 401 surface -> logout.
+    return rr == RefreshResult::Transient;
+}
+
+int OrcaCloudServiceAgent::http_get(const std::string& path, std::string* response_body, unsigned int* http_code)
+{
+    std::string url = api_base_url + path;
+    BOOST_LOG_TRIVIAL(trace) << "OrcaCloudServiceAgent: GET " << url;
+
+    if (!ensure_token_fresh("http_get_" + path))
+        BOOST_LOG_TRIVIAL(warning) << "ensure_token_fresh returned false";
+
+    auto perform = [&]() {
+        HttpResult result;
+        try {
+            auto http = Http::get(url);
+
+            std::string token = get_access_token();
+
+            auto headers = data_headers();
+            for (const auto& pair : headers) {
+                http.header(pair.first, pair.second);
+            }
+
+            if (!token.empty()) {
+                http.header("Authorization", "Bearer " + token);
+            }
+
+            http.on_complete([&](std::string body, unsigned resp_status) {
+                    result.success = true;
+                    result.status = resp_status;
+                    result.body = body;
+                })
+                .on_error([&](std::string body, std::string error, unsigned resp_status) {
+                    result.success = false;
+                    result.status  = resp_status == 0 ? 404 : resp_status;
+                    result.body    = body;
+                    BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: HTTP error - " << er
