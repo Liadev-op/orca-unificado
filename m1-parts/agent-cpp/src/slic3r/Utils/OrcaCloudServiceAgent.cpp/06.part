@@ -1,0 +1,92 @@
+!= expected_state) {
+        BOOST_LOG_TRIVIAL(warning) << "[auth] event=code_exchange result=failure reason=state_mismatch";
+        return false;
+    }
+
+    std::string code_verifier;
+    {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex);
+        code_verifier = pkce_bundle.verifier;
+    }
+
+    // Exchange the Supabase PKCE code with the token endpoint.
+    // With redirect_to, GoTrue handles Google OAuth internally and redirects to localhost
+    // with a Supabase-generated auth_code (not a raw Google code). The grant_type goes
+    // in the URL query string (same pattern as the refresh_token flow).
+    const std::string token_url = auth_base_url + auth_constants::TOKEN_PATH + "?grant_type=pkce";
+    json body_j;
+    body_j["auth_code"] = auth_code;
+    body_j["code_verifier"] = code_verifier;
+
+    std::string response;
+    unsigned int http_code = 0;
+    const bool success = http_post_token(body_j.dump(), &response, &http_code, token_url);
+
+    if (!success || http_code >= 400) {
+        BOOST_LOG_TRIVIAL(error) << "[auth] event=code_exchange result=failure http_code=" << http_code << " body=" << response;
+        return false;
+    }
+
+    session_payload = response;
+    BOOST_LOG_TRIVIAL(info) << "[auth] event=code_exchange result=success";
+    return true;
+}
+
+int OrcaCloudServiceAgent::change_user(std::string user_info)
+{
+    try {
+        auto tree = json::parse(user_info);
+
+        auto safe_str = [](const json& j, const std::string& key) -> std::string {
+            if (j.contains(key) && j[key].is_string()) return j[key].get<std::string>();
+            return "";
+        };
+
+        // Check if this is a WebView login message (PKCE flow completion)
+        std::string command = safe_str(tree, "command");
+        if (command == "user_login") {
+            if (!tree.contains("data") || !tree["data"].is_object()) {
+                BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: WebView login payload missing data field";
+                return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+            }
+            const auto& data = tree["data"];
+            std::string state = safe_str(data, "state");
+
+            // Check for auth code (PKCE authorization code flow)
+            std::string auth_code = safe_str(data, "code");
+            if (!auth_code.empty()) {
+                std::string session_payload;
+                if (!exchange_auth_code(auth_code, state, session_payload)) {
+                    return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+                }
+                // Recursively process the session payload (contains access_token, user, etc.)
+                return change_user(session_payload);
+            }
+
+            // Validate PKCE state
+            const auto expected_state = pkce_bundle.state;
+            if (!expected_state.empty() && state != expected_state) {
+                BOOST_LOG_TRIVIAL(warning) << "[auth] event=login result=failure reason=state_mismatch";
+                return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+            }
+
+            // Direct token flow (tokens already obtained by WebView)
+            bool success = set_user_session(data);
+            BOOST_LOG_TRIVIAL(info) << "[auth] event=login result=" << (success ? "success" : "failure")
+                                    << " source=webview";
+            return success ? BAMBU_NETWORK_SUCCESS : BAMBU_NETWORK_ERR_INVALID_HANDLE;
+        }
+
+        // Orca cloud session payload (default flow)
+        const json* session_node = nullptr;
+        if (tree.contains("data") && tree["data"].is_object()) {
+            const auto& data = tree["data"];
+            if (data.contains("session") && data["session"].is_object()) {
+                session_node = &data["session"];
+            } else if (data.contains("access_token") || data.contains("token")) {
+                session_node = &data;
+            }
+        }
+        if (!session_node) {
+            if (tree.contains("session") && tree["session"].is_object()) {
+               
