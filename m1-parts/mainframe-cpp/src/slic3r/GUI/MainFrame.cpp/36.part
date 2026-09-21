@@ -1,0 +1,82 @@
+og export_configs_dlg(nullptr);
+    export_configs_dlg.ShowModal();
+    return;
+
+    // Generate a cummulative configuration for the selected print, filaments and printer.
+    wxDirDialog dlg(this, _L("Choose a directory"),
+        from_u8(!m_last_config.IsEmpty() ? get_dir_name(m_last_config) : wxGetApp().app_config->get_last_dir()), wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+    wxString path;
+    if (dlg.ShowModal() == wxID_OK)
+        path = dlg.GetPath();
+    if (!path.IsEmpty()) {
+        // Export the config bundle.
+        wxGetApp().app_config->update_config_dir(into_u8(path));
+        try {
+            auto files = wxGetApp().preset_bundle->export_current_configs(into_u8(path), [this](std::string const & name) {
+                    ConfigsOverwriteConfirmDialog dlg(this, from_u8(name), true);
+                    int res = dlg.ShowModal();
+                    int ids[]{wxID_NO, wxID_YES, wxID_NOTOALL, wxID_YESTOALL};
+                    return std::find(ids, ids + 4, res) - ids;
+            }, false);
+            if (!files.empty())
+                m_last_config = from_u8(files.back());
+            MessageDialog dlg(this, wxString::Format(_L_PLURAL("There is %d config exported. (Only non-system configs)",
+                "There are %d configs exported. (Only non-system configs)", files.size()), files.size()),
+                              _L("Export result"), wxOK);
+            dlg.ShowModal();
+        } catch (const std::exception &ex) {
+            show_error(this, ex.what());
+        }
+    }
+}
+
+// Load a config file containing a Print, Filament & Printer preset.
+void MainFrame::load_config_file()
+{
+    //BBS do not load config file
+ //   if (!wxGetApp().check_and_save_current_preset_changes(_L("Loading profile file"), "", false))
+ //       return;
+    wxFileDialog dlg(this, _L("Select profile to load:"),
+        !m_last_config.IsEmpty() ? get_dir_name(m_last_config) : wxGetApp().app_config->get_last_dir(),
+        "config.json", "Config files (*.json;*.zip;*.orca_printer;*.orca_filament)|*.json;*.zip;*.orca_printer;*.orca_filament", wxFD_OPEN | wxFD_MULTIPLE | wxFD_FILE_MUST_EXIST);
+     wxArrayString files;
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+    dlg.GetPaths(files);
+    std::vector<std::string> cfiles;
+    for (auto file : files) {
+        cfiles.push_back(into_u8(file));
+        m_last_config = file;
+    }
+    bool update = false;
+    wxGetApp().preset_bundle->import_presets(cfiles, [this](std::string const & name) {
+            ConfigsOverwriteConfirmDialog dlg(this, from_u8(name), false);
+            int           res = dlg.ShowModal();
+            int           ids[]{wxID_NO, wxID_YES, wxID_NOTOALL, wxID_YESTOALL};
+            return std::find(ids, ids + 4, res) - ids;
+        },
+        ForwardCompatibilitySubstitutionRule::Enable);
+    if (!cfiles.empty()) {
+        wxGetApp().app_config->update_config_dir(get_dir_name(cfiles.back()));
+        wxGetApp().load_current_presets();
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " presets has been import,and size is" << cfiles.size();
+        NetworkAgent* agent = wxGetApp().getAgent();
+        if (agent) {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " user is: " << agent->get_user_id();
+        }
+    }
+    wxGetApp().preset_bundle->update_compatible(PresetSelectCompatibleType::Always);
+    update_side_preset_ui();
+    auto msg = wxString::Format(_L_PLURAL("There is %d config imported. (Only non-system and compatible configs)",
+        "There are %d configs imported. (Only non-system and compatible configs)", cfiles.size()), cfiles.size());
+    if(cfiles.empty())
+        msg += _L("\nHint: Make sure you have added the corresponding printer before importing the configs.");
+    MessageDialog dlg2(this,msg ,
+                        _L("Import result"), wxOK);
+    dlg2.ShowModal();
+}
+
+// Load a config file containing a Print, Filament & Printer preset from command line.
+bool MainFrame::load_config_file(const std::string &path)
+{
+    tr
