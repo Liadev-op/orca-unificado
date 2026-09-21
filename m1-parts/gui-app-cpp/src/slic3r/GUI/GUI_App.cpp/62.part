@@ -1,0 +1,120 @@
+            mode == comDevelop ? "develop" : "simple";
+    app_config->set("user_mode", mode_str);
+    update_mode();
+}
+
+// Update view mode according to selected menu
+void GUI_App::update_mode()
+{
+    sidebar().update_mode();
+
+    //BBS: GUI refactor
+    if (mainframe->m_param_panel)
+        mainframe->m_param_panel->update_mode();
+    if (mainframe->m_param_dialog)
+        mainframe->m_param_dialog->panel()->update_mode();
+    if (mainframe->m_printer_view)
+        mainframe->m_printer_view->update_mode();
+    mainframe->m_webview->update_mode();
+
+#ifdef _MSW_DARK_MODE
+    if (!wxGetApp().tabs_as_menu())
+        dynamic_cast<Notebook*>(mainframe->m_tabpanel)->UpdateMode();
+#endif
+
+    for (auto tab : tabs_list)
+        tab->update_mode();
+    for (auto tab : model_tabs_list)
+        tab->update_mode();
+
+    //BBS plater()->update_menus();
+
+    plater()->canvas3D()->update_gizmos_on_off_state();
+}
+
+void GUI_App::update_internal_development() {
+    mainframe->m_webview->update_mode();
+    if (mainframe->m_printer_view)
+        mainframe->m_printer_view->update_mode();
+}
+
+void GUI_App::show_ip_address_enter_dialog(wxString title)
+{
+    auto evt = new wxCommandEvent(EVT_SHOW_IP_DIALOG);
+    evt->SetString(title);
+    wxQueueEvent(this, evt);
+}
+
+bool GUI_App::show_modal_ip_address_enter_dialog(wxString title)
+{
+    DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
+    if (!dev) return false;
+    if (!dev->get_selected_machine()) return false;
+    auto obj = dev->get_selected_machine();
+
+    InputIpAddressDialog dlg(nullptr);
+    dlg.set_machine_obj(obj);
+    if (!title.empty()) dlg.update_title(title);
+
+    dlg.Bind(EVT_ENTER_IP_ADDRESS, [this, obj](wxCommandEvent& e) {
+        auto selection_data_arr = wxSplit(e.GetString().ToStdString(), '|');
+
+        if (selection_data_arr.size() == 2) {
+            auto ip_address = selection_data_arr[0];
+            auto access_code = selection_data_arr[1];
+
+            BOOST_LOG_TRIVIAL(info) << "User enter IP address is " << ip_address;
+            if (!ip_address.empty()) {
+                wxGetApp().app_config->set_str("ip_address", obj->dev_id, ip_address.ToStdString());
+                wxGetApp().app_config->save();
+
+                obj->dev_ip = ip_address.ToStdString();
+                obj->set_user_access_code(access_code.ToStdString());
+            }
+        }
+    });
+
+    if (dlg.ShowModal() == wxID_YES) {
+        return true;
+    }
+    return false;
+}
+
+void  GUI_App::show_ip_address_enter_dialog_handler(wxCommandEvent& evt)
+{
+    wxString title = evt.GetString();
+    show_modal_ip_address_enter_dialog(title);
+}
+
+void GUI_App::open_preferences(size_t open_on_tab, const std::string& highlight_option)
+{
+    bool app_layout_changed = false;
+    {
+        // the dialog needs to be destroyed before the call to recreate_GUI()
+        // or sometimes the application crashes into wxDialogBase() destructor
+        // so we put it into an inner scope
+        PreferencesDialog dlg(mainframe, open_on_tab, highlight_option);
+        dlg.ShowModal();
+        GLCanvas3D* canvas = this->plater_->get_current_canvas3D();
+        if (canvas)
+            canvas->force_set_focus();
+        // BBS
+        //app_layout_changed = dlg.settings_layout_changed();
+#if ENABLE_GCODE_LINES_ID_IN_H_SLIDER
+        if (dlg.seq_top_layer_only_changed() || dlg.seq_seq_top_gcode_indices_changed())
+#else
+        if (dlg.seq_top_layer_only_changed())
+#endif // ENABLE_GCODE_LINES_ID_IN_H_SLIDER
+            this->plater_->refresh_print();
+#ifdef _WIN32
+        if (is_editor()) {
+            if (app_config->get("associate_3mf") == "true")
+                associate_files(L"3mf");
+            if (app_config->get("associate_stl") == "true")
+                associate_files(L"stl");
+            if (app_config->get("associate_step") == "true") {
+                associate_files(L"step");
+                associate_files(L"stp");
+            }
+            associate_url(L"Snapmaker_Orca");
+            associate_url(
