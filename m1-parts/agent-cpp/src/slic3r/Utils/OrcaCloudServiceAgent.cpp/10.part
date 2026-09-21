@@ -1,0 +1,112 @@
+     auto it = values_map->find(IOT_JSON_KEY_UPDATED_TIME);
+        if (it != values_map->end()) {
+            original_updated_time = it->second;
+        }
+    }
+
+    // Build content JSON
+    nlohmann::json content;
+    content["name"] = name;
+
+    if (values_map && !values_map->empty()) {
+        for (const auto& pair : *values_map) {
+            // Skip updated_time - it's used for OCC, not as content
+            if (pair.first == IOT_JSON_KEY_UPDATED_TIME) continue;
+            content[pair.first] = pair.second;
+        }
+    }
+
+    auto result = sync_push(setting_id, name, content, original_updated_time, force);
+    if (http_code) *http_code = result.http_code;
+
+    if (result.success) {
+        if (values_map && result.new_updated_time != 0) {
+            (*values_map)[IOT_JSON_KEY_UPDATED_TIME] = std::to_string(result.new_updated_time);
+        }
+        return BAMBU_NETWORK_SUCCESS;
+    }
+
+    if (result.http_code == 409) {
+        // Conflict - update values_map with server version
+        if (values_map && result.server_version.updated_time != 0) {
+            (*values_map)[IOT_JSON_KEY_UPDATED_TIME] = std::to_string(result.server_version.updated_time);
+        }
+        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: put_setting conflict - server_updated_time="
+                                   << result.server_version.updated_time;
+    }
+
+    BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: put_setting failed - " << result.error_message;
+    return BAMBU_NETWORK_ERR_PUT_SETTING_FAILED;
+}
+
+int OrcaCloudServiceAgent::get_setting_list(std::string bundle_version, ProgressFn pro_fn, WasCancelledFn cancel_fn)
+{
+    return get_setting_list2(bundle_version, nullptr, pro_fn, cancel_fn);
+}
+
+int OrcaCloudServiceAgent::get_setting_list2(std::string bundle_version, CheckFn chk_fn, ProgressFn pro_fn, WasCancelledFn cancel_fn)
+{
+    (void) bundle_version;
+    bool success = false;
+    int error_code = 0;
+
+    auto on_success = [&](const SyncPullResponse& resp) {
+        int total = static_cast<int>(resp.upserts.size() + resp.deletes.size());
+        int processed = 0;
+        bool cancelled = false;
+
+        for (const auto& upsert : resp.upserts) {
+            if (cancel_fn && cancel_fn()) {
+                cancelled = true;
+                break;
+            }
+
+            if (chk_fn) {
+                std::map<std::string, std::string> info;
+                info[IOT_JSON_KEY_SETTING_ID] = upsert.id;
+                info[IOT_JSON_KEY_UPDATED_TIME] = std::to_string(upsert.updated_time);
+
+                if (upsert.content.is_object()) {
+                    for (auto& [key, value] : upsert.content.items()) {
+                        if (value.is_string()) {
+                            info[key] = value.get<std::string>();
+                        } else {
+                            info[key] = value.dump();
+                        }
+                    }
+                }
+
+                if (!info.count(IOT_JSON_KEY_NAME) && !upsert.name.empty()) {
+                    info[IOT_JSON_KEY_NAME] = upsert.name;
+                }
+                if (!info.count(IOT_JSON_KEY_TYPE)) {
+                    info[IOT_JSON_KEY_TYPE] = IOT_PRINT_TYPE_STRING;
+                }
+
+                chk_fn(info);
+            }
+
+            if (pro_fn) {
+                int progress = total > 0 ? (processed * 100 / total) : 100;
+                pro_fn(progress);
+            }
+
+            processed++;
+        }
+
+        if (!cancelled) {
+            for (const auto& deleted_id : resp.deletes) {
+                if (cancel_fn && cancel_fn()) {
+                    cancelled = true;
+                    break;
+                }
+
+                if (chk_fn) {
+                    std::map<std::string, std::string> info;
+                    info[IOT_JSON_KEY_SETTING_ID] = deleted_id;
+                    info["deleted"] = "true";
+                    chk_fn(info);
+                }
+
+                if (pro_fn) {
+                    int progress = tot

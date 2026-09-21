@@ -1,0 +1,120 @@
+al > 0 ? (processed * 100 / total) : 100;
+                    pro_fn(progress);
+                }
+
+                processed++;
+            }
+        }
+
+        if (!cancelled && resp.next_cursor != 0) {
+            std::lock_guard<std::recursive_mutex> lock(state_mutex);
+            sync_state.last_sync_timestamp = resp.next_cursor;
+            save_sync_state();
+        }
+
+        if (pro_fn) {
+            pro_fn(100);
+        }
+
+        success = !cancelled;
+    };
+
+    auto on_error = [&](int code, const std::string& err) {
+        error_code = code;
+        success = false;
+    };
+
+    sync_pull(on_success, on_error);
+
+    return success ? BAMBU_NETWORK_SUCCESS : BAMBU_NETWORK_ERR_GET_SETTING_LIST_FAILED;
+}
+
+int OrcaCloudServiceAgent::delete_setting(std::string setting_id)
+{
+    std::string path = std::string(ORCA_SYNC_DELETE_PATH) + "?resource=" + ORCA_SYNC_PROFILE_TABLE + "&id=" + setting_id;
+    std::string response;
+    unsigned int http_code = 0;
+
+    int result = http_delete(path, &response, &http_code);
+
+    // Treat 204 as success: the setting is already gone from cloud, which is our goal.
+    if (http_code == 204) {
+        return BAMBU_NETWORK_SUCCESS;
+    }
+
+    if (result != BAMBU_NETWORK_SUCCESS || http_code >= 400) {
+        return BAMBU_NETWORK_ERR_DEL_SETTING_FAILED;
+    }
+
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+// ============================================================================
+// Sync Protocol Implementation
+// ============================================================================
+
+int OrcaCloudServiceAgent::sync_pull(
+    std::function<void(const SyncPullResponse&)> on_success,
+    std::function<void(int http_code, const std::string& error)> on_error)
+{
+    std::string path = ORCA_SYNC_PULL_PATH;
+    if (sync_state.last_sync_timestamp != 0) {
+        path += "?cursor=" + std::to_string(sync_state.last_sync_timestamp);
+    }
+
+    std::string response;
+    unsigned int http_code = 0;
+    int result = http_get(path, &response, &http_code);
+
+    // Handle 410 Gone - cursor too old, need full resync
+    if (http_code == 410) {
+        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: sync_pull returned 410 Gone - cursor too old, triggering full resync";
+        clear_sync_state();
+        // Retry without cursor
+        path = ORCA_SYNC_PULL_PATH;
+        result = http_get(path, &response, &http_code);
+    }
+
+    if (result != BAMBU_NETWORK_SUCCESS || (http_code != 200 && http_code != 304)) {
+        BOOST_LOG_TRIVIAL(error) << "OrcaCloudServiceAgent: sync_pull failed - http_code=" << http_code << " - path=" << path;
+        if (on_error) on_error(http_code, response);
+        return BAMBU_NETWORK_ERR_GET_SETTING_LIST_FAILED;
+    }
+
+    if (http_code == 304) {
+        if (on_success) {
+            SyncPullResponse empty_response;
+            on_success(empty_response);
+        }
+        return BAMBU_NETWORK_SUCCESS;
+    }
+
+    try {
+        auto json = nlohmann::json::parse(response);
+        SyncPullResponse resp;
+        resp.next_cursor = json.value("next_cursor", 0);
+
+        if (json.contains("upserts") && json["upserts"].is_array()) {
+            for (const auto& item : json["upserts"]) {
+                ProfileUpsert upsert;
+                upsert.id = item.value("id", "");
+                upsert.name = item.value("name", "");
+                upsert.updated_time = item.value(ORCA_JSON_KEY_UPDATE_TIME, 0);
+                upsert.created_time = item.value(ORCA_JSON_KEY_CREATED_TIME, 0);
+                if (item.contains("content")) {
+                    upsert.content = item["content"];
+                }
+                resp.upserts.push_back(upsert);
+            }
+        }
+
+        if (json.contains("deletes") && json["deletes"].is_array()) {
+            for (const auto& item : json["deletes"]) {
+                resp.deletes.push_back(item.get<std::string>());
+            }
+        }
+
+        if (on_success) on_success(resp);
+        return BAMBU_NETWORK_SUCCESS;
+
+    } catch (cons
