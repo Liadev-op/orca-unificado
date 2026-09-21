@@ -1,0 +1,101 @@
+tension) const
+{
+    boost::filesystem::path filename = boost::filesystem::path(full_name.wx_str()).filename();
+    if (extension != nullptr)
+@@TAB@@@@TAB@@filename = filename.replace_extension(extension);
+    return filename.string();
+}
+
+std::string MainFrame::get_dir_name(const wxString &full_name) const
+{
+    return boost::filesystem::path(into_u8(full_name)).parent_path().string();
+}
+
+
+// ----------------------------------------------------------------------------
+// SettingsDialog
+// ----------------------------------------------------------------------------
+
+SettingsDialog::SettingsDialog(MainFrame* mainframe)
+:DPIDialog(NULL, wxID_ANY, wxString(SLIC3R_APP_NAME) + " - " + _L("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_STYLE, "settings_dialog"),
+//: DPIDialog(mainframe, wxID_ANY, wxString(SLIC3R_APP_NAME) + " - " + _L("Settings"), wxDefaultPosition, wxDefaultSize,
+//        wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxMINIMIZE_BOX | wxMAXIMIZE_BOX, "settings_dialog"),
+    m_main_frame(mainframe)
+{
+    if (wxGetApp().is_gcode_viewer())
+        return;
+
+#if defined(__WXMSW__)
+    // ys_FIXME! temporary workaround for correct font scaling
+    // Because of from wxWidgets 3.1.3 auto rescaling is implemented for the Fonts,
+    // From the very beginning set dialog font to the wxSYS_DEFAULT_GUI_FONT
+    this->SetFont(wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT));
+#else
+    this->SetFont(wxGetApp().normal_font());
+    this->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+#endif // __WXMSW__
+
+    // Load the icon either from the exe, or from the ico file.
+#if _WIN32
+    {
+        TCHAR szExeFileName[MAX_PATH];
+        GetModuleFileName(nullptr, szExeFileName, MAX_PATH);
+        SetIcon(wxIcon(szExeFileName, wxBITMAP_TYPE_ICO));
+    }
+#else
+    SetIcon(wxIcon(var("Snapmaker_Orca_128px.png"), wxBITMAP_TYPE_PNG));
+#endif // _WIN32
+
+    //just hide the Frame on closing
+    this->Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& evt) { this->Hide(); });
+
+#ifdef _MSW_DARK_MODE
+    if (wxGetApp().tabs_as_menu()) {
+        // menubar
+        //m_menubar = new wxMenuBar();
+        //add_tabs_as_menu(m_menubar, mainframe, this);
+        //this->SetMenuBar(m_menubar);
+    }
+#endif
+
+    // initialize layout
+    auto sizer = new wxBoxSizer(wxVERTICAL);
+    sizer->SetSizeHints(this);
+    SetSizer(sizer);
+    Fit();
+
+    const wxSize min_size = wxSize(85 * em_unit(), 50 * em_unit());
+#ifdef __APPLE__
+    // Using SetMinSize() on Mac messes up the window position in some cases
+    // cf. https://groups.google.com/forum/#!topic/wx-users/yUKPBBfXWO0
+    SetSize(min_size);
+#else
+    SetMinSize(min_size);
+    SetSize(GetMinSize());
+#endif
+    Layout();
+}
+
+void SettingsDialog::on_dpi_changed(const wxRect& suggested_rect)
+{
+    if (wxGetApp().is_gcode_viewer())
+        return;
+
+    const int& em = em_unit();
+    const wxSize& size = wxSize(85 * em, 50 * em);
+
+    // BBS
+    m_tabpanel->Rescale();
+
+    // update Tabs
+    for (auto tab : wxGetApp().tabs_list)
+        tab->msw_rescale();
+
+    SetMinSize(size);
+    Fit();
+    Refresh();
+}
+
+
+} // GUI
+} // Slic3r
