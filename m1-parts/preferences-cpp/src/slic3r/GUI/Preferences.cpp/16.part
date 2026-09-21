@@ -1,0 +1,79 @@
+xTOP, FromDIP(3));
+    sizer_page->Add(item_single_instance, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_mouse_zoom_settings, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_use_free_camera_settings, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(swap_pan_rotate, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(reverse_mouse_zoom, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(allow_filament_temp_mixing, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(camera_orbit_mult, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_show_splash_screen, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_hints, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_calc_in_long_retract, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_multi_machine, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_step_mesh_setting, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_auto_arrange, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(title_presets, 0, wxTOP | wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_calc_mode, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_user_sync, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_system_sync, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_remember_printer_config, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_save_presets, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_stealth_mode, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_enable_plugin, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_legacy_network_plugin, 0, wxTOP, FromDIP(3));
+#ifdef _WIN32
+    sizer_page->Add(title_associate_file, 0, wxTOP| wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_associate_3mf, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_associate_stl, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_associate_step, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(title_associate_url, 0, wxTOP| wxEXPAND, FromDIP(20));
+    sizer_page->Add(associate_url_prusaslicer, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(associate_url_bambustudio, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(associate_url_cura, 0, wxTOP, FromDIP(3));
+#endif // _WIN32
+    // auto item_title_modelmall = sizer_page->Add(title_modelmall, 0, wxTOP | wxEXPAND, FromDIP(20));
+    // auto item_item_modelmall = sizer_page->Add(item_modelmall, 0, wxTOP, FromDIP(3));
+    // auto update_modelmall = [this, item_title_modelmall, item_item_modelmall] (wxEvent & e) {
+    //     bool has_model_mall = wxGetApp().has_model_mall();
+    //     item_title_modelmall->Show(has_model_mall);
+    //     item_item_modelmall->Show(has_model_mall);
+    //     Layout();
+    //     Fit();
+    // };
+    // wxCommandEvent eee(wxEVT_COMBOBOX);
+    // update_modelmall(eee);
+    // item_region->GetItem(size_t(2))->GetWindow()->Bind(wxEVT_COMBOBOX, update_modelmall);
+    sizer_page->Add(title_project, 0, wxTOP| wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_project_load_behaviour, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_max_recent_count, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_recent_models, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_save_choise, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_gcodes_warning, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_backup, 0, wxTOP,FromDIP(3));
+    item_backup->Add(item_backup_interval, 0, wxLEFT, 0);
+
+    sizer_page->Add(title_downloads, 0, wxTOP| wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_downloads, 0, wxEXPAND, FromDIP(3));
+
+#ifdef _WIN32
+    sizer_page->Add(title_darkmode, 0, wxTOP | wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_darkmode, 0, wxEXPAND, FromDIP(3));
+#endif
+
+    sizer_page->Add(title_develop_mode, 0, wxTOP | wxEXPAND, FromDIP(20));
+    sizer_page->Add(item_develop_mode, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_skip_ams_blacklist_check, 0, wxTOP, FromDIP(3));
+
+
+    sizer_page->Add(title_user_experience, 0, wxTOP, FromDIP(20));
+    sizer_page->Add(item_priv_policy, 0, wxTOP, FromDIP(3));
+
+    page->SetSizer(sizer_page);
+    page->Layout();
+    sizer_page->Fit(page);
+    return page;
+}
+
+void PreferencesDialog::create_gui_page()
+{
+    auto page = new 
