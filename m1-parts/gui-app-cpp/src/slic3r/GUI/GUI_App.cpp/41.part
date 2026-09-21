@@ -1,0 +1,126 @@
+DOWS__
+#ifdef _MSW_DARK_MODE
+static void update_scrolls(wxWindow* window)
+{
+    wxWindowList::compatibility_iterator node = window->GetChildren().GetFirst();
+    while (node)
+    {
+        wxWindow* win = node->GetData();
+        if (dynamic_cast<wxScrollHelper*>(win) ||
+            dynamic_cast<wxTreeCtrl*>(win) ||
+            dynamic_cast<wxTextCtrl*>(win))
+            NppDarkMode::SetDarkExplorerTheme(win->GetHWND());
+
+        update_scrolls(win);
+        node = node->GetNext();
+    }
+}
+#endif //_MSW_DARK_MODE
+
+
+#ifdef _MSW_DARK_MODE
+void GUI_App::force_menu_update()
+{
+    NppDarkMode::SetSystemMenuForApp(app_config->get("sys_menu_enabled") == "1");
+}
+#endif //_MSW_DARK_MODE
+#endif //__WINDOWS__
+
+void GUI_App::force_colors_update()
+{
+#ifdef _MSW_DARK_MODE
+#ifdef __WINDOWS__
+    NppDarkMode::SetDarkMode(dark_mode());
+    if (WXHWND wxHWND = wxToolTip::GetToolTipCtrl())
+        NppDarkMode::SetDarkExplorerTheme((HWND)wxHWND);
+    NppDarkMode::SetDarkTitleBar(mainframe->GetHWND());
+
+
+    //NppDarkMode::SetDarkExplorerTheme((HWND)mainframe->m_settings_dialog.GetHWND());
+    //NppDarkMode::SetDarkTitleBar(mainframe->m_settings_dialog.GetHWND());
+
+#endif // __WINDOWS__
+#endif //_MSW_DARK_MODE
+    m_force_colors_update = true;
+}
+
+// Called after the Preferences dialog is closed and the program settings are saved.
+// Update the UI based on the current preferences.
+void GUI_App::update_ui_from_settings()
+{
+    update_label_colours();
+    // Upadte UI colors before Update UI from settings
+    if (m_force_colors_update) {
+        m_force_colors_update = false;
+        //UpdateDlgDarkUI(&mainframe->m_settings_dialog);
+        //mainframe->m_settings_dialog.Refresh();
+        //mainframe->m_settings_dialog.Update();
+
+        if (mainframe) {
+#ifdef __WINDOWS__
+            mainframe->force_color_changed();
+            update_scrolls(mainframe);
+            update_scrolls(&mainframe->m_settings_dialog);
+#endif //_MSW_DARK_MODE
+            update_dark_children_ui(mainframe);
+        }
+    }
+
+    if (mainframe) {mainframe->update_ui_from_settings();}
+}
+
+void GUI_App::persist_window_geometry(wxTopLevelWindow *window, bool default_maximized)
+{
+    const std::string name = into_u8(window->GetName());
+
+    window->Bind(wxEVT_CLOSE_WINDOW, [=](wxCloseEvent &event) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< ": received wxEVT_CLOSE_WINDOW, trigger save for window_mainframe";
+        window_pos_save(window, "mainframe");
+        event.Skip();
+    });
+
+    if (window_pos_restore(window, "mainframe", default_maximized)) {
+        on_window_geometry(window, [=]() {
+            window_pos_sanitize(window);
+        });
+    } else {
+        on_window_geometry(window, [=]() {
+            window_pos_center(window);
+        });
+    }
+}
+
+void GUI_App::load_project(wxWindow *parent, wxString& input_file) const
+{
+    input_file.Clear();
+    wxFileDialog dialog(parent ? parent : GetTopWindow(),
+        _L("Choose one file (3mf):"),
+        from_u8(app_config->get_last_dir()), "",
+        file_wildcards(FT_PROJECT), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+
+    if (dialog.ShowModal() == wxID_OK)
+        input_file = dialog.GetPath();
+}
+
+void GUI_App::import_model(wxWindow *parent, wxArrayString& input_files) const
+{
+    input_files.Clear();
+    wxFileDialog dialog(parent ? parent : GetTopWindow(),
+#ifdef __APPLE__
+        _L("Choose one or more files (3mf/step/stl/svg/obj/amf/usd*/abc/ply):"),
+#else
+        _L("Choose one or more files (3mf/step/stl/svg/obj/amf):"),
+#endif
+        from_u8(app_config->get_last_dir()), "",
+        file_wildcards(FT_MODEL), wxFD_OPEN | wxFD_MULTIPLE | wxFD_FILE_MUST_EXIST);
+
+    if (dialog.ShowModal() == wxID_OK)
+        dialog.GetPaths(input_files);
+}
+
+void GUI_App::import_zip(wxWindow* parent, wxString& input_file) const
+{
+    wxFileDialog dialog(parent ? parent : GetTopWindow(),
+                        _L("Choose ZIP file") + ":",
+                        from_u8(app_config->get_last_dir()), "",
+                        file_wi
