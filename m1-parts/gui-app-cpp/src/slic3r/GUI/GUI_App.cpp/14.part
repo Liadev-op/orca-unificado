@@ -1,0 +1,89 @@
+ter.value();
+                                }
+                                else if (boost::iequals(sub_iter.key(), "version")) {
+                                    version = *(Semver::parse(sub_iter.value()));
+                                }
+                                else if (boost::iequals(sub_iter.key(), "description")) {
+                                    description = sub_iter.value();
+                                }
+                                else if (boost::iequals(sub_iter.key(), "url")) {
+                                    url = sub_iter.value();
+                                }
+                            }
+                            BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get type " << type << ", version " << version.to_string() << ", url " << url;
+                            download_url = url;
+                        }
+                    }
+                }
+                else {
+                    BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: get version of plugin failed, body=" << body;
+                }
+            }
+            catch (...) {
+                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1]: catch unknown exception";
+                ;
+            }
+        }).on_error(
+            [&result, &err_msg](std::string body, std::string error, unsigned int status) {
+                BOOST_LOG_TRIVIAL(error) << "[download_plugin 1] on_error: " << error<<", body = " << body;
+                err_msg += "[download_plugin 1] on_error: " + error + ", body = " + body;
+                result = -1;
+        }).perform_sync();
+
+#if defined(__WINDOWS__)
+    if (is_running_on_arm64() && !NetworkAgent::use_legacy_network) {
+        //set back
+        std::map<std::string, std::string> current_headers = Slic3r::Http::get_extra_headers();
+        current_headers["X-BBL-OS-Type"] = "windows";
+
+        Slic3r::Http::set_extra_headers(current_headers);
+        BOOST_LOG_TRIVIAL(info) << boost::format("download_plugin: set X-BBL-OS-Type back to windows");
+    }
+#endif
+
+    bool cancel = false;
+    if (result < 0) {
+        j["result"] = "failed";
+        j["error_msg"] = err_msg;
+        if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
+        return result;
+    }
+
+
+    if (download_url.empty()) {
+        BOOST_LOG_TRIVIAL(info) << "[download_plugin 1]: no available plugin found for this app version: " << SLIC3R_VERSION;
+        if (pro_fn) pro_fn(InstallStatusDownloadFailed, 0, cancel);
+        j["result"] = "failed";
+        j["error_msg"] = "[download_plugin 1]: no available plugin found for this app version: " + std::string(SLIC3R_VERSION);
+        return -1;
+    }
+    else if (pro_fn) {
+        pro_fn(InstallStatusNormal, 5, cancel);
+    }
+
+    if (m_networking_cancel_update || cancel) {
+        BOOST_LOG_TRIVIAL(info) << boost::format("[download_plugin 1]: %1%, cancelled by user") % __LINE__;
+        j["result"] = "failed";
+        j["error_msg"] = (boost::format("[download_plugin 1]: %1%, cancelled by user") % __LINE__).str();
+        return -1;
+    }
+    BOOST_LOG_TRIVIAL(info) << "[download_plugin] get_url = " << download_url;
+
+    // download
+    Slic3r::Http http = Slic3r::Http::get(download_url);
+    int reported_percent = 0;
+    http.on_progress(
+        [this, &pro_fn, cancel_fn, &result, &reported_percent, &err_msg](Slic3r::Http::Progress progress, bool& cancel) {
+            int percent = 0;
+            if (progress.dltotal != 0)
+                percent = progress.dlnow * 50 / progress.dltotal;
+            bool was_cancel = false;
+            if (pro_fn && ((percent - reported_percent) >= 10)) {
+                pro_fn(InstallStatusNormal, percent, was_cancel);
+                reported_percent = percent;
+                BOOST_LOG_TRIVIAL(info) << "[download_plugin 2] progress: " << reported_percent;
+            }
+            cancel = m_networking_cancel_update || was_cancel;
+            if (cancel_fn)
+                if (cancel_fn())
+                    cancel 
