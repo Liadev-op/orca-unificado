@@ -35,12 +35,12 @@ jobs:
         run: |
           $ErrorActionPreference = "SilentlyContinue"
           @(
-            "C:\Program Files\Android",
-            "C:\Program Files (x86)\Android",
-            "C:\hostedtoolcache\windows\CodeQL",
-            "C:\hostedtoolcache\windows\go",
-            "C:\hostedtoolcache\windows\Java",
-            "C:\hostedtoolcache\windows\Ruby"
+            "C:\\Program Files\\Android",
+            "C:\\Program Files (x86)\\Android",
+            "C:\\hostedtoolcache\\windows\\CodeQL",
+            "C:\\hostedtoolcache\\windows\\go",
+            "C:\\hostedtoolcache\\windows\\Java",
+            "C:\\hostedtoolcache\\windows\\Ruby"
           ) | ForEach-Object { if (Test-Path $_) { Remove-Item -Recurse -Force $_ } }
           Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
 
@@ -59,7 +59,7 @@ jobs:
           $date = Get-Date -Format "yyyyMMdd"
           $ver = "V2.4.0"
           $raw = Get-Content version.inc -Raw
-          if ($raw -match 'set\(Snapmaker_VERSION "(.*?)"\)') {
+          if ($raw -match 'set\\(Snapmaker_VERSION "(.*?)"\\)') {
             $ver = "V$($Matches[1])"
           }
           "ver=$ver" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
@@ -80,6 +80,7 @@ jobs:
         with:
           path: deps/build/OrcaSlicer_dep
           key: windows-2022-orcaunificado-deps-${{ hashFiles('deps/**') }}
+          save-always: true
 
       - name: Verify cached OpenSSL
         id: deps-ok
@@ -97,14 +98,14 @@ jobs:
         if: steps.deps-ok.outputs.ok != 'true'
         run: |
           choco install strawberryperl --no-progress -y
-          echo "C:\Strawberry\perl\bin" >> $env:GITHUB_PATH
+          echo "C:\\Strawberry\\perl\\bin" >> $env:GITHUB_PATH
 
       - name: Build deps
         if: steps.deps-ok.outputs.ok != 'true'
         working-directory: ${{ github.workspace }}
         shell: pwsh
         run: |
-          .\build_release_vs2022.bat deps
+          .\\build_release_vs2022.bat deps
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Drop deps intermediate trees
@@ -117,16 +118,16 @@ jobs:
       - name: Detect Windows SDK
         shell: pwsh
         run: |
-          $kits = "C:\Program Files (x86)\Windows Kits\10"
+          $kits = "C:\\Program Files (x86)\\Windows Kits\\10"
           $include = Join-Path $kits "Include"
           Get-ChildItem $include | ForEach-Object { $_.Name }
           $sdk = Get-ChildItem $include -Directory |
-            Where-Object { Test-Path (Join-Path $_.FullName "um\windows.h") } |
+            Where-Object { Test-Path (Join-Path $_.FullName "um\\windows.h") } |
             Sort-Object Name -Descending |
             Select-Object -First 1
           if (-not $sdk) { throw "Windows 10 SDK not found under $include" }
-          $sdkDir = $kits.TrimEnd('\') + [char]92
-          $sdkVer = $sdk.Name.TrimEnd('\') + [char]92
+          $sdkDir = $kits.TrimEnd('\\') + [char]92
+          $sdkVer = $sdk.Name.TrimEnd('\\') + [char]92
           "WindowsSdkDir=$sdkDir" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
           "WindowsSDKVersion=$sdkVer" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
           Write-Host "SDK $($sdk.Name)"
@@ -138,27 +139,27 @@ jobs:
           WindowsSdkDir: ${{ env.WindowsSdkDir }}
           WindowsSDKVersion: ${{ env.WindowsSDKVersion }}
         run: |
-          .\build_release_vs2022.bat slicer
+          .\\build_release_vs2022.bat slicer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Pack portable zip
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
-          $prefix = Join-Path $env:GITHUB_WORKSPACE "build\Snapmaker_Orca"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "build\\Snapmaker_Orca"
           if (-not (Test-Path $prefix)) { throw "cmake install prefix missing: $prefix" }
           $exe = Join-Path $prefix "snapmaker-orca.exe"
           if (-not (Test-Path $exe)) {
             Get-ChildItem $prefix -Recurse -Filter "*.exe" | Select-Object -First 30 FullName
             throw "snapmaker-orca.exe not in install prefix"
           }
-          $dest = Join-Path $env:GITHUB_WORKSPACE "build\OrcaUnificado"
+          $dest = Join-Path $env:GITHUB_WORKSPACE "build\\OrcaUnificado"
           if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
           Copy-Item -Recurse $prefix $dest
           $zipName = "OrcaUnificado_Windows_$($env:ver)_portable.zip"
-          $zip = Join-Path $env:GITHUB_WORKSPACE "build\$zipName"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "build\\$zipName"
           if (Test-Path $zip) { Remove-Item -Force $zip }
-          & "C:\Program Files\7-Zip\7z.exe" a -tzip $zip $dest
+          & "C:\\Program Files\\7-Zip\\7z.exe" a -tzip $zip $dest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item $zip | Format-List FullName, Length
 
@@ -181,13 +182,13 @@ jobs:
           files: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
           body: |
             Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado).
-            No pisa %APPDATA%\Snapmaker_Orca ni %APPDATA%\OrcaSlicer.
+            No pisa %APPDATA%\\Snapmaker_Orca ni %APPDATA%\\OrcaSlicer.
 
             1. Descarga el zip.
             2. Extrae la carpeta OrcaUnificado.
             3. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).
 
-            Datos: %APPDATA%\OrcaUnificado.
+            Datos: %APPDATA%\\OrcaUnificado.
             Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (evita pisa el instalador oficial Snapmaker).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
