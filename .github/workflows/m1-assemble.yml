@@ -43,6 +43,7 @@ jobs:
                   z64s = sorted(pdir.glob('*.z64'))
                   if parts:
                       data = b''.join(p.read_bytes() for p in parts)
+                      data = data.replace(b'<<TAB>>', b'\t')
                   elif z64s:
                       zdata = b''.join(base64.b64decode(c.read_bytes()) for c in z64s)
                       data = zlib.decompress(zdata)
