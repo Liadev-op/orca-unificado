@@ -21,7 +21,7 @@ jobs:
       - name: Assemble ready M1 part batches
         run: |
           python3 << 'PY'
-          import base64, pathlib, subprocess, sys, zlib
+          import base64, hashlib, pathlib, subprocess, sys, zlib
           root = pathlib.Path('m1-parts')
           if not root.exists():
               print('no m1-parts')
@@ -36,16 +36,30 @@ jobs:
               msg_file = batch / 'message.txt'
               msg = msg_file.read_text(encoding='utf-8').strip() if msg_file.exists() else f'M1: assemble {batch.name}'
               wrote = []
-              for pdir in sorted({p.parent for p in batch.rglob('*.z64')}):
+              pdirs = {p.parent for p in list(batch.rglob('*.z64')) + list(batch.rglob('*.part'))}
+              for pdir in sorted(pdirs):
                   rel = pdir.relative_to(batch).as_posix()
-                  chunks = sorted(pdir.glob('*.z64'))
-                  zdata = b''.join(base64.b64decode(c.read_bytes()) for c in chunks)
-                  data = zlib.decompress(zdata)
+                  parts = sorted(pdir.glob('*.part'))
+                  z64s = sorted(pdir.glob('*.z64'))
+                  if parts:
+                      data = b''.join(p.read_bytes() for p in parts)
+                  elif z64s:
+                      zdata = b''.join(base64.b64decode(c.read_bytes()) for c in z64s)
+                      data = zlib.decompress(zdata)
+                  else:
+                      continue
+                  got = hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+                  expect = pdir / 'expect.sha'
+                  if expect.exists():
+                      want = expect.read_text(encoding='utf-8').strip()
+                      if got != want:
+                          print('SHA MISMATCH', rel, 'got', got, 'want', want)
+                          sys.exit(1)
                   out = pathlib.Path(rel)
                   out.parent.mkdir(parents=True, exist_ok=True)
                   out.write_bytes(data)
                   wrote.append((rel, len(data)))
-                  print('wrote', rel, len(data))
+                  print('wrote', rel, len(data), got)
               if not wrote:
                   continue
               subprocess.check_call(['git', 'add', '--'] + [w[0] for w in wrote])
