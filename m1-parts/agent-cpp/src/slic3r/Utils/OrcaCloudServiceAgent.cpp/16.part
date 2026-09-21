@@ -1,0 +1,86 @@
+    // on process death, so no holder can keep it longer than that bound.
+    InterProcessRefreshTokenLock lock(token_lock_path());
+    if (!lock.locked()) {
+        // Lock syscall genuinely failed (rare). Proceed best-effort rather than give up.
+        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: token refresh lock unavailable, "
+                                      "proceeding unsynchronized (reason=" << reason << ")";
+    }
+
+    std::string refresh_token;
+    std::string user_secret;
+
+    // We read the refresh token from the OS keychain as the source of truth
+    if (load_user_secret(user_secret) && !user_secret.empty()) {
+        SessionInfo stored_session;
+        parse_stored_secret(user_secret, refresh_token, stored_session);
+    }
+
+    // We only read from memory if the read from OS keychain fails
+    if (refresh_token.empty())
+        refresh_token = get_refresh_token();
+
+    if (refresh_token.empty()) {
+        BOOST_LOG_TRIVIAL(warning) << "OrcaCloudServiceAgent: no refresh token available for refresh (reason=" << reason << ")";
+        return RefreshResult::AuthRejected;  // no persisted token: nothing to preserve
+    }
+
+    // Synchronous: hold the lock across the network round-trip AND the write-back that
+    // set_user_session performs, so the rotation is atomic w.r.t. other instances.
+    return refresh_now(refresh_token, reason, /*async=*/false);
+}
+
+bool OrcaCloudServiceAgent::refresh_if_expiring(std::chrono::seconds skew, const std::string& reason)
+{
+    bool needs_refresh = false;
+    {
+        std::lock_guard<std::mutex> lock(session_mutex);
+        needs_refresh = should_refresh_locked(skew);
+    }
+
+    if (!needs_refresh) return true;
+
+    // First attempt. refresh_from_storage blocks on the cross-process lock and reads the
+    // freshest token from the store, so cross-instance contention is already resolved here.
+    RefreshResult r = refresh_from_storage(reason, false);
+    if (r == RefreshResult::Success)      return true;
+    if (r == RefreshResult::AuthRejected) return false;  // definitive: retrying the same token can't help
+
+    // One retry, only for a transient network failure of the refresh POST (lost response,
+    // timeout, 429/5xx -> Transient). The retry re-acquires the lock and re-reads the store.
+    std::this_thread::sleep_for(std::chrono::milliseconds(750));
+    return refresh_from_storage(reason + "_retry", false) == RefreshResult::Success;
+}
+
+// Maps a token-refresh HTTP outcome to a RefreshResult. http_code == 0 means the
+// server could not be reached; session_established is only meaningful for a 2xx body.
+static RefreshResult classify_refresh_result(unsigned http_code, bool session_established)
+{
+    if (http_code == 0)
+        return RefreshResult::Transient;                  // no response: network/transport failure
+    if (http_code == 400 || http_code == 401 || http_code == 403)
+        return RefreshResult::AuthRejected;               // refresh token rejected
+    if (http_code >= 400)
+        return RefreshResult::Transient;                  // rate-limit (429), server error (5xx) or other 4xx: keep the session
+    return session_established ? RefreshResult::Success    // 2xx with a usable session
+                              : RefreshResult::Transient;  // 2xx but unusable body
+}
+
+// Best-effort extraction of GoTrue's "error_code" field (e.g. "refresh_token_already_used").
+// Returns "" if the body is not a JSON object or lacks the field.
+static std::string extract_error_code(const std::string& body)
+{
+    const json j = json::parse(body, nullptr, false);
+    if (j.is_object())
+        return get_json_string_field(j, "error_code");
+    return "";
+}
+
+static long long now_epoch_seconds()
+{
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+RefreshResult OrcaCloudServiceAgent::refresh_session_with_token(const std::string& refresh_token, const std::string& reason)
+{
+    std::string
