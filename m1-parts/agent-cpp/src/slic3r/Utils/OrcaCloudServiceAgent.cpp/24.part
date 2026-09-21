@@ -1,0 +1,107 @@
+::lock_guard<std::recursive_mutex> lock(state_mutex);
+    get_country_code_fn = fn;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::set_queue_on_main_fn(QueueOnMainFn fn)
+{
+    std::lock_guard<std::recursive_mutex> lock(state_mutex);
+    queue_on_main_fn = fn;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+// ============================================================================
+// Stub Implementations (Cloud Services, Model Mall, Analytics, Ratings)
+// ============================================================================
+
+int OrcaCloudServiceAgent::get_my_message(int type, int after, int limit, unsigned int* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_my_message (stub)";
+    if (http_code) *http_code = 200;
+    if (http_body) *http_body = "[]";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::check_user_task_report(int* task_id, bool* printable)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: check_user_task_report (stub)";
+    if (task_id) *task_id = 0;
+    if (printable) *printable = false;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_user_print_info(unsigned int* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_user_print_info (stub)";
+    if (http_code) *http_code = 200;
+    if (http_body) *http_body = "{}";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_user_tasks(TaskQueryParams params, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_user_tasks (stub)";
+    if (http_body) *http_body = "[]";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_printer_firmware(std::string dev_id, unsigned* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_printer_firmware (stub)";
+    if (http_code) *http_code = 200;
+    if (http_body) *http_body = "{}";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_task_plate_index(std::string task_id, int* plate_index)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_task_plate_index (stub)";
+    if (plate_index) *plate_index = 0;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_user_info(int* identifier)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_user_info (stub)";
+    if (identifier) *identifier = 0;
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_subtask_info(std::string subtask_id, std::string* task_json, unsigned int* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_subtask_info (stub)";
+    if (task_json) *task_json = "{}";
+    if (http_code) *http_code = 200;
+    if (http_body) *http_body = "{}";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_slice_info(std::string project_id, std::string profile_id, int plate_index, std::string* slice_json)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_slice_info (stub)";
+    if (slice_json) *slice_json = "{}";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::query_bind_status(std::vector<std::string> query_list, unsigned int* http_code, std::string* http_body)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: query_bind_status (stub)";
+    if (http_code) *http_code = 200;
+    if (http_body) *http_body = "{}";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::modify_printer_name(std::string dev_id, std::string dev_name)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: modify_printer_name (stub)";
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_camera_url(std::string dev_id, std::function<void(std::string)> callback)
+{
+    BOOST_LOG_TRIVIAL(debug) << "OrcaCloudServiceAgent: get_camera_url (stub)";
+    if (callback) callback("");
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int OrcaCloudServiceAgent::get_design_staffpick(int offset, int limit, std:
