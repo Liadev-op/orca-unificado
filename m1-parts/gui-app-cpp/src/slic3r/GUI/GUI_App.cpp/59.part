@@ -1,0 +1,61 @@
+ at the start of the application,
+// based on the "language" key stored in the application config.
+bool GUI_App::load_language(wxString language, bool initial)
+{
+    BOOST_LOG_TRIVIAL(info) << boost::format("%1%: language %2%, initial: %3%") %__FUNCTION__ %language %initial;
+    if (initial) {
+    @@TAB@@// There is a static list of lookup path prefixes in wxWidgets. Add ours.
+@@TAB@@    wxFileTranslationsLoader::AddCatalogLookupPathPrefix(from_u8(localization_dir()));
+    @@TAB@@// Get the active language from PrusaSlicer.ini, or empty string if the key does not exist.
+        language = app_config->get("language");
+        if (! language.empty())
+        @@TAB@@BOOST_LOG_TRIVIAL(info) << boost::format("language provided by Snapmaker_Orca.conf: %1%") % language;
+        else {
+            // Get the system language.
+            const wxLanguage lang_system = wxLanguage(wxLocale::GetSystemLanguage());
+            if (lang_system != wxLANGUAGE_UNKNOWN) {
+                m_language_info_system = wxLocale::GetLanguageInfo(lang_system);
+#ifdef __WXMSW__
+                WCHAR wszLanguagesBuffer[LOCALE_NAME_MAX_LENGTH];
+                ::LCIDToLocaleName(LOCALE_USER_DEFAULT, wszLanguagesBuffer, LOCALE_NAME_MAX_LENGTH, 0);
+                wxString lang(wszLanguagesBuffer);
+                lang.Replace('-', '_');
+                if (auto info = wxLocale::FindLanguageInfo(lang))
+                    m_language_info_system = info;
+#endif
+                BOOST_LOG_TRIVIAL(info) << boost::format("System language detected (user locales and such): %1%") % m_language_info_system->CanonicalName.ToUTF8().data();
+                // BBS set language to app config
+                app_config->set("language", m_language_info_system->CanonicalName.ToUTF8().data());
+            } else {
+                {
+                    // Allocating a temporary locale will switch the default wxTranslations to its internal wxTranslations instance.
+                    wxLocale temp_locale;
+                    temp_locale.Init();
+                    // Set the current translation's language to default, otherwise GetBestTranslation() may not work (see the wxWidgets source code).
+                    wxTranslations::Get()->SetLanguage(wxLANGUAGE_DEFAULT);
+                    // Let the wxFileTranslationsLoader enumerate all translation dictionaries for PrusaSlicer
+                    // and try to match them with the system specific "preferred languages".
+                    // There seems to be a support for that on Windows and OSX, while on Linuxes the code just returns wxLocale::GetSystemLanguage().
+                    // The last parameter gets added to the list of detected dictionaries. This is a workaround
+                    // for not having the English dictionary. Let's hope wxWidgets of various versions process this call the same way.
+                    wxString best_language = wxTranslations::Get()->GetBestTranslation(SLIC3R_APP_KEY, wxLANGUAGE_ENGLISH);
+                    if (!best_language.IsEmpty()) {
+                        m_language_info_best = wxLocale::FindLanguageInfo(best_language);
+                        BOOST_LOG_TRIVIAL(info) << boost::format("Best translation language detected (may be different from user locales): %1%") %
+                                                        m_language_info_best->CanonicalName.ToUTF8().data();
+                        app_config->set("language", m_language_info_best->CanonicalName.ToUTF8().data());
+                    }
+#ifdef __linux__
+                    wxString lc_all;
+                    if (wxGetEnv("LC_ALL", &lc_all) && !lc_all.IsEmpty()) {
+                        // Best language returned by wxWidgets on Linux apparently does not respect LC_ALL.
+                        // Disregard the "best" suggestion in case LC_ALL is provided.
+                        m_language_info_best = nullptr;
+                    }
+#endif
+                }
+            }
+        }
+    }
+
+@@TAB@@const wxLanguageInfo *language

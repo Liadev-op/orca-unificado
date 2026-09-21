@@ -1,0 +1,74 @@
+&dialog);
+
+    dialog.SetSelection(initialSelection);
+    return dialog.ShowModal() == wxID_OK ? dialog.GetSelection() : -1;
+#else
+    return wxGetSingleChoiceIndex(message, caption, choices, initialSelection);
+#endif
+}
+
+// select language from the list of installed languages
+bool GUI_App::select_language()
+{
+@@TAB@@wxArrayString translations = wxTranslations::Get()->GetAvailableTranslations(SLIC3R_APP_KEY);
+    std::vector<const wxLanguageInfo*> language_infos;
+    language_infos.emplace_back(wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH));
+    for (size_t i = 0; i < translations.GetCount(); ++ i) {
+@@TAB@@    const wxLanguageInfo *langinfo = wxLocale::FindLanguageInfo(translations[i]);
+        if (langinfo != nullptr)
+            language_infos.emplace_back(langinfo);
+    }
+    sort_remove_duplicates(language_infos);
+@@TAB@@std::sort(language_infos.begin(), language_infos.end(), [](const wxLanguageInfo* l, const wxLanguageInfo* r) { return l->Description < r->Description; });
+
+    wxArrayString names;
+    names.Alloc(language_infos.size());
+
+    // Some valid language should be selected since the application start up.
+    const wxLanguage current_language = wxLanguage(m_wxLocale->GetLanguage());
+    int @@TAB@@@@TAB@@     init_selection   @@TAB@@@@TAB@@= -1;
+    int @@TAB@@@@TAB@@@@TAB@@ init_selection_alt     = -1;
+    int @@TAB@@@@TAB@@@@TAB@@ init_selection_default = -1;
+    for (size_t i = 0; i < language_infos.size(); ++ i) {
+        if (wxLanguage(language_infos[i]->Language) == current_language)
+        @@TAB@@// The dictionary matches the active language and country.
+            init_selection = i;
+        else if ((language_infos[i]->CanonicalName.BeforeFirst('_') == m_wxLocale->GetCanonicalName().BeforeFirst('_')) ||
+        @@TAB@@@@TAB@@ // if the active language is Slovak, mark the Czech language as active.
+        @@TAB@@     (language_infos[i]->CanonicalName.BeforeFirst('_') == "cs" && m_wxLocale->GetCanonicalName().BeforeFirst('_') == "sk"))
+        @@TAB@@// The dictionary matches the active language, it does not necessarily match the country.
+        @@TAB@@init_selection_alt = i;
+        if (language_infos[i]->CanonicalName.BeforeFirst('_') == "en")
+        @@TAB@@// This will be the default selection if the active language does not match any dictionary.
+        @@TAB@@init_selection_default = i;
+        names.Add(language_infos[i]->Description);
+    }
+    if (init_selection == -1)
+    @@TAB@@// This is the dictionary matching the active language.
+    @@TAB@@init_selection = init_selection_alt;
+    if (init_selection != -1)
+    @@TAB@@// This is the language to highlight in the choice dialog initially.
+    @@TAB@@init_selection_default = init_selection;
+
+    const long index = GetSingleChoiceIndex(_L("Select the language"), _L("Language"), names, init_selection_default);
+@@TAB@@// Try to load a new language.
+    if (index != -1 && (init_selection == -1 || init_selection != index)) {
+    @@TAB@@const wxLanguageInfo *new_language_info = language_infos[index];
+    @@TAB@@if (this->load_language(new_language_info->CanonicalName, false)) {
+@@TAB@@@@TAB@@@@TAB@@// Save language at application config.
+            // Which language to save as the selected dictionary language?
+            // 1) Hopefully the language set to wxTranslations by this->load_language(), but that API is weird and we don't want to rely on its
+            //    stability in the future:
+            //    wxTranslations::Get()->GetBestTranslation(SLIC3R_APP_KEY, wxLANGUAGE_ENGLISH);
+            // 2) Current locale language may not match the dictionary name, see GH issue #3901
+            //    m_wxLocale->GetCanonicalName()
+            // 3) new_language_info->CanonicalName is a safe bet. It points to a valid dictionary name.
+@@TAB@@@@TAB@@@@TAB@@app_config->set("language", new_language_info->CanonicalName.ToUTF8().data());
+    @@TAB@@@@TAB@@return true;
+        }
+    }
+
+    return false;
+}
+
+// Load gettext translation files and activate them
