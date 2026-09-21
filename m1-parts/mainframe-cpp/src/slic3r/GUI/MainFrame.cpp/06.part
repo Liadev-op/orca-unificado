@@ -1,0 +1,105 @@
+) == 'G') {
+            m_plater->apply_background_progress();
+            m_print_enable = get_enable_print_status();
+            m_print_btn->Enable(m_print_enable);
+            if (m_print_enable) {
+                if (wxGetApp().preset_bundle->use_bbl_network())
+                    wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_PRINT_PLATE));
+                else
+                    wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_SEND_GCODE));
+            }
+            evt.Skip();
+            return;
+        }
+        else if (evt.CmdDown() && evt.GetKeyCode() == 'G') { if (can_export_gcode()) { wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_EXPORT_SLICED_FILE)); } evt.Skip(); return; }
+        if (evt.CmdDown() && evt.GetKeyCode() == 'J') { m_printhost_queue_dlg->Show(); return; }
+        if (evt.CmdDown() && evt.GetKeyCode() == 'N') { m_plater->new_project(); return;}
+        if (evt.CmdDown() && evt.GetKeyCode() == 'O') { m_plater->load_project(); return;}
+        if (evt.CmdDown() && evt.ShiftDown() && evt.GetKeyCode() == 'S') { if (can_save_as()) m_plater->save_project(true); return;}
+        else if (evt.CmdDown() && evt.GetKeyCode() == 'S') { if (can_save()) m_plater->save_project(); return;}
+        if (evt.CmdDown() && evt.GetKeyCode() == 'F') {
+            if (m_plater && (m_tabpanel->GetSelection() == TabPosition::tp3DEditor || m_tabpanel->GetSelection() == TabPosition::tpPreview)) {
+                m_plater->sidebar().can_search();
+            }
+        }
+#ifdef __APPLE__
+        if (evt.CmdDown() && evt.GetKeyCode() == ',')
+#else
+        if (evt.CmdDown() && evt.GetKeyCode() == 'P')
+#endif
+        {
+            // Orca: Use GUI_App::open_preferences instead of direct call so windows associations are updated on exit
+            wxGetApp().open_preferences();
+            plater()->get_current_canvas3D()->force_set_focus();
+            return;
+        }
+
+        if (evt.CmdDown() && evt.GetKeyCode() == 'I') {
+            if (!can_add_models()) return;
+            if (m_plater) { m_plater->add_file(); }
+            return;
+        }
+
+        const bool isFitCameraShortcut = !evt.HasAnyModifiers() &&
+                                         (evt.GetKeyCode() == 'Z' || evt.GetKeyCode() == 'z');
+        if (isFitCameraShortcut)
+        {
+            if (ShouldSkipFitCameraShortcut(m_plater) || !can_change_view())
+            {
+                evt.Skip();
+            }
+            else
+            {
+                ZoomCameraToFit();
+            }
+
+            return;
+        }
+
+        evt.Skip();
+    });
+
+#ifdef _MSW_DARK_MODE
+    wxGetApp().UpdateDarkUIWin(this);
+#endif // _MSW_DARK_MODE
+
+    wxGetApp().persist_window_geometry(this, true);
+    wxGetApp().persist_window_geometry(&m_settings_dialog, true);
+    // bind events from DiffDlg
+
+    bind_diff_dialog();
+}
+
+void MainFrame::bind_diff_dialog()
+{
+    auto get_tab = [](Preset::Type type) {
+        Tab* null_tab = nullptr;
+        for (Tab* tab : wxGetApp().tabs_list)
+            if (tab->type() == type)
+                return tab;
+        return null_tab;
+    };
+
+    auto transfer = [this, get_tab](Preset::Type type) {
+        get_tab(type)->transfer_options(diff_dialog.get_left_preset_name(type),
+                                        diff_dialog.get_right_preset_name(type),
+                                        diff_dialog.get_selected_options(type));
+    };
+
+    auto process_options = [this](std::function<void(Preset::Type)> process) {
+        const Preset::Type diff_dlg_type = diff_dialog.view_type();
+        if (diff_dlg_type == Preset::TYPE_INVALID) {
+            for (const Preset::Type& type : diff_dialog.types_list() )
+                process(type);
+        }
+        else
+            process(diff_dlg_type);
+    };
+
+    diff_dialog.Bind(EVT_DIFF_DIALOG_TRANSFER,      [process_options, transfer](SimpleEvent&)         { process_options(transfer); });
+}
+
+
+#ifdef __WIN32__
+
+// Orca: Fix maximized window overlaps taskbar when taskbar auto hide is enabled (
