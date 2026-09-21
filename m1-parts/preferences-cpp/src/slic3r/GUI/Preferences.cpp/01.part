@@ -1,0 +1,84 @@
+       app_config->set(param, std::to_string(e.GetSelection()));
+        e.Skip();
+    });
+
+    return sizer;
+}
+
+wxBoxSizer *PreferencesDialog::create_item_combobox(wxString title, wxWindow *parent, wxString tooltip, std::string param, std::vector<wxString> vlist, std::vector<std::string> config_name_index)
+{
+    assert(vlist.size() == config_name_index.size());
+    unsigned int current_index = 0;
+
+    auto current_setting = app_config->get(param);
+    if (!current_setting.empty()) {
+        auto compare  = [current_setting](string possible_setting) { return current_setting == possible_setting; };
+        auto iterator = find_if(config_name_index.begin(), config_name_index.end(), compare);
+        current_index = iterator - config_name_index.begin();
+    }
+
+    auto [sizer, combobox] = create_item_combobox_base(title, parent, tooltip, param, vlist, current_index);
+
+    //// save config
+    combobox->GetDropDown().Bind(wxEVT_COMBOBOX, [this, param, config_name_index](wxCommandEvent& e) {
+        app_config->set(param, config_name_index[e.GetSelection()]);
+        e.Skip();
+    });
+
+    return sizer;
+}
+
+wxBoxSizer *PreferencesDialog::create_item_language_combobox(
+    wxString title, wxWindow *parent, wxString tooltip, int padding_left, std::string param, std::vector<const wxLanguageInfo *> vlist)
+{
+    wxBoxSizer *m_sizer_combox = new wxBoxSizer(wxHORIZONTAL);
+    m_sizer_combox->Add(0, 0, 0, wxEXPAND | wxLEFT, 23);
+
+    auto combo_title = new wxStaticText(parent, wxID_ANY, title, wxDefaultPosition, DESIGN_TITLE_SIZE, 0);
+    combo_title->SetForegroundColour(DESIGN_GRAY900_COLOR);
+    combo_title->SetFont(::Label::Body_13);
+    combo_title->SetToolTip(tooltip);
+    combo_title->Wrap(-1);
+    m_sizer_combox->Add(combo_title, 0, wxALIGN_CENTER | wxALL, 3);
+
+
+    auto combobox = new ::ComboBox(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, DESIGN_LARGE_COMBOBOX_SIZE, 0, nullptr, wxCB_READONLY);
+    combobox->SetFont(::Label::Body_13);
+    combobox->GetDropDown().SetFont(::Label::Body_13);
+    auto language = app_config->get(param);
+    m_current_language_selected = -1;
+    std::vector<wxString>::iterator iter;
+    for (size_t i = 0; i < vlist.size(); ++i) {
+        auto language_name = vlist[i]->Description;
+
+        if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_CHINESE_SIMPLIFIED)) {
+            language_name = wxString::FromUTF8("\xe4\xb8\xad\xe6\x96\x87\x28\xe7\xae\x80\xe4\xbd\x93\x29");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_CHINESE)) {
+            language_name = wxString::FromUTF8("\xe4\xb8\xad\xe6\x96\x87\x28\xe7\xb9\x81\xe4\xbd\x93\x29");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_SPANISH)) {
+            language_name = wxString::FromUTF8("\x45\x73\x70\x61\xc3\xb1\x6f\x6c");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_GERMAN)) {
+            language_name = wxString::FromUTF8("Deutsch");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_CZECH)) {
+            language_name = wxString::FromUTF8("Czech");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_SWEDISH)) {
+            language_name = wxString::FromUTF8("\x53\x76\x65\x6e\x73\x6b\x61"); //Svenska
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_DUTCH)) {
+            language_name = wxString::FromUTF8("Nederlands");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_FRENCH)) {
+            language_name = wxString::FromUTF8("\x46\x72\x61\x6E\xC3\xA7\x61\x69\x73");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_HUNGARIAN)) {
+            language_name = wxString::FromUTF8("Magyar");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE_JAPANESE)) {
+            language_name = wxString::FromUTF8("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E");
+        }
+        else if (vlist[i] == wxLocale::GetLanguageInfo(wxLANGUAGE
