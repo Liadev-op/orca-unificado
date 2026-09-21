@@ -1,0 +1,120 @@
+ binary_string + "\" \"%1\"";
+
+    wxRegKey key_first(wxRegKey::HKCU, "Software\\Classes\\" + url_prefix);
+    wxRegKey key_full(wxRegKey::HKCU, "Software\\Classes\\" + url_prefix + "\\shell\\open\\command");
+    if (!key_first.Exists()) {
+        key_first.Create(false);
+    }
+    key_first.SetValue("URL Protocol", "");
+
+    if (!key_full.Exists()) {
+        key_full.Create(false);
+    }
+    key_full = key_string;
+#elif defined(__linux__) && defined(SLIC3R_DESKTOP_INTEGRATION)
+    DesktopIntegrationDialog::perform_downloader_desktop_integration(into_u8(url_prefix));
+#endif // WIN32
+}
+
+void GUI_App::disassociate_url(std::wstring url_prefix)
+{
+#ifdef WIN32
+    wxRegKey key_full(wxRegKey::HKCU, "Software\\Classes\\" + url_prefix + "\\shell\\open\\command");
+    if (!key_full.Exists()) {
+        return;
+    }
+    key_full = "";
+#endif // WIN32
+}
+
+
+bool GUI_App::sm_disconnect_current_machine(bool need_reload_printerview)
+{
+    std::shared_ptr<PrintHost> host = nullptr;
+    wxGetApp().get_connect_host(host);
+    wxString msg = "";
+
+    if (host) {
+        host->disconnect(msg, {});
+    }
+
+    if (true) {
+        wxGetApp().CallAfter([this, need_reload_printerview](){
+            wxGetApp().app_config->set("use_new_connect", "false");
+            /*auto p_config = &(wxGetApp().preset_bundle->printers.get_edited_preset().config);
+            p_config->set("print_host", "");*/
+
+            auto devices = wxGetApp().app_config->get_devices();
+            for (size_t i = 0; i < devices.size(); ++i) {
+                if (devices[i].connected) {
+                    devices[i].connected = false;
+                    wxGetApp().app_config->save_device_info(devices[i]);
+                    break;
+                }
+            }
+
+            //// 同步卡片
+            //json param;
+            //param["command"]       = "local_devices_arrived";
+            //param["sequece_id"]    = "10001";
+            //param["data"]          = devices;
+            //std::string logout_cmd = param.dump();
+            //wxString    strJS      = wxString::Format("window.postMessage(%s)", logout_cmd);
+            //GUI::wxGetApp().run_script(strJS);
+
+            // wcp订阅
+            json data = this->app_config->get_devices();
+            wxGetApp().device_card_notify(data);
+
+            wxGetApp().mainframe->plater()->sidebar().update_all_preset_comboboxes(need_reload_printerview);
+            wxGetApp().set_connect_host(nullptr);
+
+            wxGetApp().preset_bundle->machine_filaments.clear();
+            // wxGetApp().load_current_presets();
+
+        });
+
+    }
+
+    return true;
+}
+
+void GUI_App::start_download(std::string url)
+{
+    if (!plater_) {
+        BOOST_LOG_TRIVIAL(error) << "Could not start URL download: plater is nullptr.";
+        return;
+    }
+    //lets always init so if the download dest folder was changed, new dest is used
+    boost::filesystem::path dest_folder(app_config->get("download_path"));
+    if (dest_folder.empty() || !boost::filesystem::is_directory(dest_folder)) {
+        std::string msg = _u8L("Could not start URL download. Destination folder is not set. Please choose destination folder in Configuration Wizard.");
+        BOOST_LOG_TRIVIAL(error) << msg;
+        show_error(nullptr, msg);
+        return;
+    }
+    m_downloader->init(dest_folder);
+    m_downloader->start_download(url);
+
+}
+
+void GUI_App::SMUserInfo::notify() {
+    json data;
+    if (m_login) {
+        data["status"]   = "online";
+        data["nickname"] = m_login_user_name;
+        data["icon"]     = m_login_user_icon_url;
+        data["token"]    = m_login_user_token;
+        data["userid"]   = m_login_user_id;
+        data["account"]  = m_login_user_account;
+    } else {
+        data["status"] = "offline";
+    }
+
+    wxGetApp().user_login_notify(data);
+
+}
+bool is_support_filament(int extruder_id)
+{
+    auto &filament_presets = Slic3r::GUI::wxGetApp().preset_bundle->filament_presets;
+    auto &filaments        = Slic3r::GUI::wxGetApp().preset_bundle->filame
