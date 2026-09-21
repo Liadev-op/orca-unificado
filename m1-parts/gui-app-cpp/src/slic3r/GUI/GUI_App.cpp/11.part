@@ -1,0 +1,101 @@
+cw_showed = this->config_wizard_startup();
+
+            SSWCP_MqttAgent_Instance::m_dialog = new WebPresetDialog(this);
+
+            std::string http_url = get_http_url(app_config->get_country_code());
+            std::string language = GUI::into_u8(current_language_code());
+            std::string network_ver = Slic3r::NetworkAgent::get_version();
+            bool        sys_preset  = app_config->get("sync_system_preset") == "true";
+            this->preset_updater->sync(http_url, language, network_ver, sys_preset ? preset_bundle : nullptr);
+            this->preset_updater->sync_web_async(true);
+            this->check_new_version_sf(false, false);
+
+        });
+    }
+
+    if(!m_networking_need_update && m_agent) {
+        m_agent->set_on_ssdp_msg_fn(
+            [this](std::string json_str) {
+                if (m_is_closing) {
+                    return;
+                }
+                GUI::wxGetApp().CallAfter([this, json_str] {
+                    if (m_device_manager) {
+                        m_device_manager->on_machine_alive(json_str);
+                    }
+                    });
+            }
+        );
+        m_agent->set_on_http_error_fn([this](unsigned int status, std::string body) {
+            this->handle_http_error(status, body);
+        });
+        m_agent->start_discovery(true, false);
+    }
+
+    //update the plugin tips
+    CallAfter([this] {
+            mainframe->refresh_plugin_tips();
+        });
+
+    // update hms info
+    CallAfter([this] {
+            if (hms_query)
+                hms_query->check_hms_info();
+        });
+
+
+    DeviceManager::load_filaments_blacklist_config();
+
+    // remove old log files over LOG_FILES_MAX_NUM
+    std::string log_addr = data_dir();
+    if (!log_addr.empty()) {
+        auto log_folder = boost::filesystem::path(log_addr) / "log";
+        if (boost::filesystem::exists(log_folder)) {
+           std::vector<std::pair<time_t, std::string>> files_vec;
+           for (auto& it : boost::filesystem::directory_iterator(log_folder)) {
+               auto temp_path = it.path();
+               try {
+                   if (it.status().type() == boost::filesystem::regular_file) {
+                       std::time_t lw_t = boost::filesystem::last_write_time(temp_path) ;
+                       files_vec.push_back({ lw_t, temp_path.filename().string() });
+                   }
+               } catch (const std::exception &) {
+               }
+           }
+           std::sort(files_vec.begin(), files_vec.end(), [](
+               std::pair<time_t, std::string> &a, std::pair<time_t, std::string> &b) {
+               return a.first > b.first;
+           });
+
+           while (files_vec.size() > LOG_FILES_MAX_NUM) {
+               auto full_path = log_folder / boost::filesystem::path(files_vec[files_vec.size() - 1].second);
+               BOOST_LOG_TRIVIAL(info) << "delete log file over " << LOG_FILES_MAX_NUM << ", filename: "<< files_vec[files_vec.size() - 1].second;
+               try {
+                   boost::filesystem::remove(full_path);
+               }
+               catch (const std::exception& ex) {
+                   BOOST_LOG_TRIVIAL(error) << "failed to delete log file: "<< files_vec[files_vec.size() - 1].second << ". Error: " << ex.what();
+               }
+               files_vec.pop_back();
+           }
+        }
+    }
+    BOOST_LOG_TRIVIAL(info) << "finished post_init";
+//BBS: remove the single instance currently
+#ifdef _WIN32
+    // Sets window property to mainframe so other instances can indentify it.
+    OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
+#endif //WIN32
+}
+
+wxDEFINE_EVENT(EVT_ENTER_FORCE_UPGRADE, wxCommandEvent);
+wxDEFINE_EVENT(EVT_SHOW_NO_NEW_VERSION, wxCommandEvent);
+wxDEFINE_EVENT(EVT_SHOW_DIALOG, wxCommandEvent);
+wxDEFINE_EVENT(EVT_CONNECT_LAN_MODE_PRINT, wxCommandEvent);
+IMPLEMENT_APP(GUI_App)
+
+//BBS: remove GCodeViewer as seperate APP logic
+//GUI_App::GUI_App(EAppMode mode)
+GUI_App::GUI_App()
+    : wxApp()
+    
