@@ -1,0 +1,124 @@
+server_version = get_version(version_info.version_str, matcher);
+
+            if (current_version >= server_version) {
+                if(by_user)
+                    this->no_new_version();
+                return;
+            }
+
+            if (isForceUpgrade)
+            {
+                wxGetApp().app_config->set_bool("force_upgrade", version_info.force_upgrade);
+                wxGetApp().app_config->set("upgrade", "force_upgrade", true);
+                wxGetApp().app_config->set("upgrade", "description", version_info.description);
+                wxGetApp().app_config->set("upgrade", "version", version_info.version_str);
+                wxGetApp().app_config->set("upgrade", "url", version_info.url);
+                GUI::wxGetApp().enter_force_upgrade();
+                return;
+            }
+
+            wxCommandEvent* evt = new wxCommandEvent(EVT_SLIC3R_VERSION_ONLINE);
+            evt->SetString(version_info.url);
+            if (by_user)
+                evt->SetInt(UPDATE_BY_USER);
+            GUI::wxGetApp().QueueEvent(evt);
+        } catch (const std::exception& ex) {
+            std::string errorMsg = ex.what();
+            BOOST_LOG_TRIVIAL(fatal) << "request server soft update data error:" << errorMsg;
+          }
+        })
+        .perform();
+}
+void GUI_App::process_network_msg(std::string dev_id, std::string msg)
+{
+    if (dev_id.empty()) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << msg;
+    }
+}
+
+void GUI_App::enter_force_upgrade()
+{
+    wxCommandEvent *evt = new wxCommandEvent(EVT_ENTER_FORCE_UPGRADE);
+    GUI::wxGetApp().QueueEvent(evt);
+}
+
+void GUI_App::set_skip_version(bool skip)
+{
+    BOOST_LOG_TRIVIAL(info) << "set_skip_version, skip = " << skip << ", version = " <<version_info.version_str;
+    if (skip) {
+        app_config->set("skip_version", version_info.version_str);
+    }else {
+        app_config->set("skip_version", "");
+    }
+}
+
+bool GUI_App::check_privacy_update()
+{
+    if (privacy_version_info.version_str.empty() || privacy_version_info.description.empty()
+        || privacy_version_info.url.empty()) {
+        return false;
+    }
+
+    std::string local_privacy_ver = app_config->get("privacy_version");
+    auto curr_version = Semver::parse(local_privacy_ver);
+    auto remote_version = Semver::parse(privacy_version_info.version_str);
+    if (curr_version && remote_version) {
+        if (*remote_version > *curr_version || app_config->get("privacy_update_checked") != "true") {
+            return true;
+        }
+    }
+    return false;
+}
+
+void GUI_App::no_new_version()
+{
+    wxCommandEvent* evt = new wxCommandEvent(EVT_SHOW_NO_NEW_VERSION);
+    GUI::wxGetApp().QueueEvent(evt);
+}
+
+std::string GUI_App::version_display = "";
+
+std::string GUI_App::format_display_version()
+{
+    if (!version_display.empty()) return version_display;
+
+    version_display = std::string("Snapmaker Orca ") + Snapmaker_VERSION;
+    return version_display;
+}
+
+std::string GUI_App::format_IP(const std::string& ip)
+{
+    std::string format_ip = ip;
+    size_t pos_st = 0;
+    size_t pos_en = 0;
+
+    for (int i = 0; i < 2; i++) {
+        pos_en = format_ip.find('.', pos_st + 1);
+        if (pos_en == std::string::npos) {
+            return ip;
+        }
+        format_ip.replace(pos_st, pos_en - pos_st, "***");
+        pos_st = pos_en + 1;
+    }
+
+    return format_ip;
+}
+
+void GUI_App::show_dialog(wxString msg)
+{
+    if (m_info_dialog_content.empty()) {
+        wxCommandEvent* evt = new wxCommandEvent(EVT_SHOW_DIALOG);
+        evt->SetString(msg);
+        GUI::wxGetApp().QueueEvent(evt);
+        m_info_dialog_content = msg;
+    }
+}
+
+void  GUI_App::push_notification(wxString msg, wxString title, UserNotificationStyle style)
+{
+    if (!this->is_enable_multi_machine()) {
+        if (style == UserNotificationStyle::UNS_NORMAL) {
+            if (m_info_dialog_content.empty()) {
+                wxCommandEvent* evt = new wxCommandEvent(EVT_SHOW_DIALOG);
+                evt->SetString(msg);
+                GUI::wxGetApp().QueueEvent
