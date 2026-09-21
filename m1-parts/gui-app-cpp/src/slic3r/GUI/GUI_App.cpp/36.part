@@ -1,0 +1,134 @@
+tand out
+        if (color_difference < 10) {
+            fg_col = StateColor::SetLightness(fg_col, 90);
+        }
+        // some of the stock colors have a lightness of ~49
+        if (fg_l < 45) {
+            fg_col = StateColor::SetLightness(fg_col, 70);
+        }
+        // at this point it shouldn't be possible that fg_col is the same as bg_col, but let's be safe
+        if (fg_col == bg_col) {
+            fg_col = StateColor::SetLightness(fg_col, 70);
+        }
+
+        window->SetForegroundColour(fg_col);
+    }
+    else {
+        auto original_col = window->GetBackgroundColour();
+        auto bg_col = StateColor::lightModeColorFor(original_col);
+
+        if (bg_col != original_col) {
+            window->SetBackgroundColour(bg_col);
+        }
+
+        original_col = window->GetForegroundColour();
+        auto fg_col = StateColor::lightModeColorFor(original_col);
+
+        if (fg_col != original_col) {
+            window->SetForegroundColour(fg_col);
+        }
+    }
+}
+
+// recursive function for scaling fonts for all controls in Window
+static void update_dark_children_ui(wxWindow* window, bool just_buttons_update = false)
+{
+    /*bool is_btn = dynamic_cast<wxButton*>(window) != nullptr;
+    is_btn = false;*/
+    if (!window) return;
+
+    wxGetApp().UpdateDarkUI(window);
+
+    auto children = window->GetChildren();
+    for (auto child : children) {
+        update_dark_children_ui(child);
+    }
+}
+
+// Note: Don't use this function for Dialog contains ScalableButtons
+void GUI_App::UpdateDarkUIWin(wxWindow* win)
+{
+    update_dark_children_ui(win);
+}
+
+void GUI_App::Update_dark_mode_flag()
+{
+    m_is_dark_mode = dark_mode();
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": switch the current dark mode status to %1% ")%m_is_dark_mode;
+}
+
+void GUI_App::UpdateDlgDarkUI(wxDialog* dlg)
+{
+#ifdef __WINDOWS__
+    NppDarkMode::SetDarkExplorerTheme(dlg->GetHWND());
+    NppDarkMode::SetDarkTitleBar(dlg->GetHWND());
+#endif
+    update_dark_children_ui(dlg);
+}
+
+void GUI_App::UpdateFrameDarkUI(wxFrame* dlg)
+{
+#ifdef __WINDOWS__
+    NppDarkMode::SetDarkExplorerTheme(dlg->GetHWND());
+    NppDarkMode::SetDarkTitleBar(dlg->GetHWND());
+#endif
+    update_dark_children_ui(dlg);
+}
+
+void GUI_App::UpdateDVCDarkUI(wxDataViewCtrl* dvc, bool highlited/* = false*/)
+{
+#ifdef __WINDOWS__
+    UpdateDarkUI(dvc, highlited ? dark_mode() : false);
+#ifdef _MSW_DARK_MODE
+    //dvc->RefreshHeaderDarkMode(&m_normal_font);
+    HWND hwnd;
+    if (!dvc->HasFlag(wxDV_NO_HEADER)) {
+        hwnd = (HWND) dvc->GenericGetHeader()->GetHandle();
+        hwnd = GetWindow(hwnd, GW_CHILD);
+        if (hwnd != NULL)
+            NppDarkMode::SetDarkListViewHeader(hwnd);
+        wxItemAttr attr;
+        attr.SetTextColour(NppDarkMode::GetTextColor());
+        attr.SetFont(m_normal_font);
+        dvc->SetHeaderAttr(attr);
+    }
+#endif //_MSW_DARK_MODE
+    if (dvc->HasFlag(wxDV_ROW_LINES))
+        dvc->SetAlternateRowColour(m_color_highlight_default);
+    if (dvc->GetBorder() != wxBORDER_SIMPLE)
+        dvc->SetWindowStyle(dvc->GetWindowStyle() | wxBORDER_SIMPLE);
+#endif
+}
+
+void GUI_App::UpdateAllStaticTextDarkUI(wxWindow* parent)
+{
+#ifdef __WINDOWS__
+    wxGetApp().UpdateDarkUI(parent);
+
+    auto children = parent->GetChildren();
+    for (auto child : children) {
+        if (dynamic_cast<wxStaticText*>(child))
+            child->SetForegroundColour(m_color_label_default);
+    }
+#endif
+}
+
+void GUI_App::init_fonts()
+{
+    // BBS: modify font
+    m_small_font = Label::Body_10;
+    m_bold_font = Label::Body_10.Bold();
+    m_normal_font = Label::Body_10;
+
+#ifdef __WXMAC__
+    m_small_font.SetPointSize(11);
+    m_bold_font.SetPointSize(13);
+#endif /*__WXMAC__*/
+
+    // wxSYS_OEM_FIXED_FONT and wxSYS_ANSI_FIXED_FONT use the same as
+    // DEFAULT in wxGtk. Use the TELETYPE family as a work-around
+    m_code_font = wxFont(wxFontInfo().Family(wxFONTFAMILY_TELETYPE));
+    m_code_font.SetPointSize(m_small_font.GetPointSize());
+}
+
+void GUI_App::update_fonts(const MainFrame *main_fram

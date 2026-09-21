@@ -1,0 +1,155 @@
+e)
+{
+    /* Only normal and bold fonts are used for an application rescale,
+     * because of under MSW small and normal fonts are the same.
+     * To avoid same rescaling twice, just fill this values
+     * from rescaled MainFrame
+     */
+@@TAB@@if (main_frame == nullptr)
+@@TAB@@@@TAB@@main_frame = this->mainframe;
+    m_normal_font   = Label::Body_14; // BBS: larger font size
+    m_small_font    = m_normal_font;
+    m_bold_font     = m_normal_font.Bold();
+    m_link_font     = m_bold_font.Underlined();
+    m_em_unit       = main_frame->em_unit();
+    m_code_font.SetPointSize(m_small_font.GetPointSize());
+}
+
+void GUI_App::set_label_clr_modified(const wxColour& clr)
+{
+    return;
+    //BBS
+    /*
+    if (m_color_label_modified == clr)
+        return;
+    m_color_label_modified = clr;
+    const std::string str = encode_color(ColorRGB(clr.Red(), clr.Green(), clr.Blue()));
+    app_config->save();
+    */
+}
+
+void GUI_App::set_label_clr_sys(const wxColour& clr)
+{
+    return;
+    //BBS
+    /*
+    if (m_color_label_sys == clr)
+        return;
+    m_color_label_sys = clr;
+    const std::string str = encode_color(ColorRGB(clr.Red(), clr.Green(), clr.Blue()));
+    app_config->save();
+    */
+}
+
+bool GUI_App::get_side_menu_popup_status()
+{
+    return m_side_popup_status;
+}
+
+void GUI_App::set_side_menu_popup_status(bool status)
+{
+    m_side_popup_status = status;
+}
+
+void GUI_App::link_to_network_check()
+{
+    std::string url;
+    std::string country_code = app_config->get_country_code();
+
+
+    if (country_code == "US") {
+        url = "https://status.bambulab.com";
+    }
+    else if (country_code == "CN") {
+        url = "https://status.bambulab.cn";
+    }
+    else {
+        url = "https://status.bambulab.com";
+    }
+    wxLaunchDefaultBrowser(url);
+}
+
+void GUI_App::link_to_lan_only_wiki()
+{
+    std::string url;
+    std::string country_code = app_config->get_country_code();
+
+    if (country_code == "US") {
+        url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode";
+    }
+    else if (country_code == "CN") {
+        url = "https://wiki.bambulab.com/zh/knowledge-sharing/enable-lan-mode";
+    }
+    else {
+        url = "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode";
+    }
+    wxLaunchDefaultBrowser(url);
+}
+
+bool GUI_App::tabs_as_menu() const
+{
+    return false;
+}
+
+wxSize GUI_App::get_min_size() const
+{
+    return wxSize(76*m_em_unit, 49 * m_em_unit);
+}
+
+float GUI_App::toolbar_icon_scale(const bool is_limited/* = false*/) const
+{
+#ifdef __APPLE__
+    const float icon_sc = 1.0f; // for Retina display will be used its own scale
+#else
+    const float icon_sc = m_em_unit * 0.1f;
+#endif // __APPLE__
+
+    //return icon_sc;
+
+    const std::string& auto_val = app_config->get("toolkit_size");
+
+    if (auto_val.empty())
+        return icon_sc;
+
+    int int_val =  100;
+    // correct value in respect to toolkit_size
+    int_val = std::min(atoi(auto_val.c_str()), int_val);
+
+    if (is_limited && int_val < 50)
+        int_val = 50;
+
+    return 0.01f * int_val * icon_sc;
+}
+
+void GUI_App::set_auto_toolbar_icon_scale(float scale) const
+{
+#ifdef __APPLE__
+    const float icon_sc = 1.0f; // for Retina display will be used its own scale
+#else
+    const float icon_sc = m_em_unit * 0.1f;
+#endif // __APPLE__
+
+    long int_val = std::min(int(std::lround(scale / icon_sc * 100)), 100);
+    std::string val = std::to_string(int_val);
+
+    app_config->set("toolkit_size", val);
+}
+
+// check user printer_presets for the containing information about "Print Host upload"
+void GUI_App::check_printer_presets()
+{
+//BBS
+#if 0
+    std::vector<std::string> preset_names = PhysicalPrinter::presets_with_print_host_information(preset_bundle->printers);
+    if (preset_names.empty())
+        return;
+
+    // BBS: remove "print host upload" message dialog
+    preset_bundle->physical_printers.load_printers_from_presets(preset_bundle->printers);
+#endif
+}
+
+void switch_window_pools();
+void release_window_pools();
+
+void GUI_App::schedule_recreate_gui_when_no_
