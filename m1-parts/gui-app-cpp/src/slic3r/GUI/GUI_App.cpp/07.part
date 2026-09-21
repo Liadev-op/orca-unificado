@@ -1,0 +1,90 @@
+     if (lParam == SHCNE_MEDIAINSERTED || lParam == SHCNE_MEDIAREMOVED) {
+            struct _ITEMIDLIST* pidl = *reinterpret_cast<struct _ITEMIDLIST**>(wParam);
+            if (! SHGetPathFromIDList(pidl, sPath)) {
+                BOOST_LOG_TRIVIAL(error) << "MediaInserted: SHGetPathFromIDList failed";
+                return false;
+            }
+        }
+        switch (lParam) {
+        case SHCNE_MEDIAINSERTED:
+        {
+            //printf("SHCNE_MEDIAINSERTED %S\n", sPath);
+            plater->GetEventHandler()->AddPendingEvent(VolumeAttachedEvent(EVT_VOLUME_ATTACHED));
+            break;
+        }
+        case SHCNE_MEDIAREMOVED:
+        {
+            //printf("SHCNE_MEDIAREMOVED %S\n", sPath);
+            plater->GetEventHandler()->AddPendingEvent(VolumeDetachedEvent(EVT_VOLUME_DETACHED));
+            break;
+        }
+@@TAB@@    default:
+//          printf("Unknown\n");
+            break;
+@@TAB@@    }
+        return true;
+    });
+
+    wxWindow::MSWRegisterMessageHandler(WM_INPUT, [](wxWindow *win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
+        auto main_frame = dynamic_cast<MainFrame*>(Slic3r::GUI::find_toplevel_parent(win));
+        auto plater = (main_frame == nullptr) ? nullptr : main_frame->plater();
+//        if (wParam == RIM_INPUTSINK && plater != nullptr && main_frame->IsActive()) {
+        if (wParam == RIM_INPUT && plater != nullptr && main_frame->IsActive()) {
+        RAWINPUT raw;
+@@TAB@@@@TAB@@@@TAB@@UINT rawSize = sizeof(RAWINPUT);
+@@TAB@@@@TAB@@@@TAB@@::GetRawInputData((HRAWINPUT)lParam, RID_INPUT, &raw, &rawSize, sizeof(RAWINPUTHEADER));
+@@TAB@@@@TAB@@@@TAB@@if (raw.header.dwType == RIM_TYPEHID && plater->get_mouse3d_controller().handle_raw_input_win32(raw.data.hid.bRawData, raw.data.hid.dwSizeHid))
+@@TAB@@@@TAB@@@@TAB@@@@TAB@@return true;
+@@TAB@@@@TAB@@}
+        return false;
+    });
+
+@@TAB@@wxWindow::MSWRegisterMessageHandler(WM_COPYDATA, [](wxWindow* win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
+@@TAB@@@@TAB@@COPYDATASTRUCT* copy_data_structure = { 0 };
+@@TAB@@@@TAB@@copy_data_structure = (COPYDATASTRUCT*)lParam;
+@@TAB@@@@TAB@@if (copy_data_structure->dwData == 1) {
+@@TAB@@@@TAB@@@@TAB@@LPCWSTR arguments = (LPCWSTR)copy_data_structure->lpData;
+@@TAB@@@@TAB@@@@TAB@@Slic3r::GUI::wxGetApp().other_instance_message_handler()->handle_message(boost::nowide::narrow(arguments));
+@@TAB@@@@TAB@@}
+@@TAB@@@@TAB@@return true;
+@@TAB@@@@TAB@@});
+}
+#endif // WIN32
+
+// Windows 11 build number threshold: build >= 22000 = Windows 11
+constexpr int kWindows11BuildNumber = 22000;
+
+void GUI_App::log_version_info()
+{
+    // Cache OS description on first call so that subsequent calls from background
+    // threads (e.g. generic_exception_handle -> OnExceptionInMainLoop) do not
+    // invoke wxWidgets APIs, which are not thread-safe on Linux.
+    static std::string s_cached_os_desc;
+    static std::once_flag s_os_flag;
+    std::call_once(s_os_flag, []() {
+        std::string os_desc{};
+#if defined(__LINUX__) || defined(__linux__)
+        wxLinuxDistributionInfo distro = wxGetLinuxDistributionInfo();
+        if (!distro.Id.empty()) {
+            os_desc = distro.Id.ToStdString();
+            if (!distro.Release.empty())
+                os_desc += " " + distro.Release.ToStdString();
+        }
+#endif
+        if (os_desc.empty()) {
+            os_desc = wxGetOsDescription().ToStdString();
+        }
+
+#if defined(_WIN32)
+        // Append Windows version numbers (major.minor.build) for all Windows versions.
+        // Also correct "Windows 10" → "Windows 11" for builds >= 22000.
+        int major = 0, minor = 0, micro = 0;
+        wxGetOsVersion(&major, &minor, &micro);
+        if (micro >= kWindows11BuildNumber) {
+            size_t pos = os_desc.find("Windows 10");
+            if (pos != std::string::npos)
+                os_desc.replace(pos, 10, "Windows 11");
+        }
+        os_desc += " (" + std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(micro) + ")";
+#endif
+       
