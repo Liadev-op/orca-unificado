@@ -1,0 +1,73 @@
+)->find_preset_renamed(name); }
+
+    size_t update_compatible_internal(const PresetWithVendorProfile &active_printer, const PresetWithVendorProfile *active_print, PresetSelectCompatibleType unselect_if_incompatible);
+public:
+    static bool                     is_dirty(const Preset *edited, const Preset *reference);
+    static std::vector<std::string> dirty_options(const Preset *edited, const Preset *reference, const bool deep_compare = false);
+    static std::vector<std::string> flow_variant_dirty_options(const Preset *edited, const Preset *reference,
+                                                               ConfigFlowDomain domain,
+                                                               const std::vector<std::string> &option_keys);
+    //BBS: add function for dirty_options_without_option_list
+    static std::vector<std::string> dirty_options_without_option_list(const Preset *edited, const Preset *reference, const std::set<std::string>& option_ignore_list, const bool deep_compare = false);
+private:
+    // Type of this PresetCollection: TYPE_PRINT, TYPE_FILAMENT or TYPE_PRINTER.
+    Preset::Type            m_type;
+    // List of presets, starting with the "- default -" preset.
+    // Use deque to force the container to allocate an object per each entry,
+    // so that the addresses of the presets don't change during resizing of the container.
+    std::deque<Preset>      m_presets;
+    // System profiles may have aliases. Map to the full profile name.
+    std::map<std::string, std::vector<std::string>> m_map_alias_to_profile_name;
+    std::unordered_map<std::string, std::unordered_set<std::string>> m_printer_hold_alias;
+    // Map from old system profile name to a current system profile name.
+    std::map<std::string, std::string> m_map_system_profile_renamed;
+    // Initially this preset contains a copy of the selected preset. Later on, this copy may be modified by the user.
+    Preset                  m_edited_preset;
+    // Contains a copy of the last saved selected preset.
+    Preset                  m_saved_preset;
+
+    // Selected preset.
+    size_t                  m_idx_selected;
+    // Is the "- default -" preset suppressed?
+    bool                    m_default_suppressed  = true;
+    size_t                  m_num_default_presets = 0;
+
+    // Path to the directory to store the config files into.
+    std::string             m_dir_path;
+
+    // to access select_preset_by_name_strict() and the default & copy constructors.
+    friend class PresetBundle;
+
+    //BBS: mutex
+    std::mutex          m_mutex;
+
+    // Orca: used for validation only
+    int m_errors = 0;
+};
+
+// Printer supports the FFF and SLA technologies, with different set of configuration values,
+// therefore this PresetCollection needs to handle two defaults.
+class PrinterPresetCollection : public PresetCollection
+{
+public:
+    PrinterPresetCollection(Preset::Type type, const std::vector<std::string> &keys, const Slic3r::StaticPrintConfig &defaults, const std::string &default_name = "Default Printer") :
+@@TAB@@@@TAB@@PresetCollection(type, keys, defaults, default_name) {}
+
+    const Preset&   default_preset_for(const DynamicPrintConfig &config) const override;
+
+    const Preset*   find_system_preset_by_model_and_variant(const std::string &model_id, const std::string &variant) const;
+    const Preset*   find_custom_preset_by_model_and_variant(const std::string &model_id, const std::string &variant) const;
+
+    bool            only_default_printers() const;
+private:
+    PrinterPresetCollection() = default;
+    PrinterPresetCollection(const PrinterPresetCollection &other) = default;
+    PrinterPresetCollection& operator=(const PrinterPresetCollection &other) = default;
+
+    friend class PresetBundle;
+};
+
+namespace PresetUtils {
+@@TAB@@// PrinterModel of a system profile, from which this preset is derived, or null if it is not derived from a system profile.
+@@TAB@@const VendorProfile::PrinterModel* system_printer_model(const Preset &preset);
+    std:
