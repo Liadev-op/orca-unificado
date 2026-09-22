@@ -109,6 +109,15 @@ public:
         void write_response(std::stringstream& ssOut) override;
     };
 
+    class ResponseHtml : public Response
+    {
+        const std::string html;
+    public:
+        ResponseHtml(std::string body) : html(std::move(body)) {}
+        ~ResponseHtml() override = default;
+        void write_response(std::stringstream& ssOut) override;
+    };
+
     class ResponseRedirect : public Response
     {
         const std::string location_str;
@@ -183,6 +192,7 @@ public:
     static std::string map_url_to_file_path(const std::string& url);
 
     static std::shared_ptr<Response> bbl_auth_handle_request(const std::string& url);
+    static std::shared_ptr<Response> orca_auth_handle_request(const std::string& url);
 
     static std::shared_ptr<Response> web_server_handle_request(const std::string& url);
 

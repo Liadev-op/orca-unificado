@@ -17,6 +17,8 @@
 #include "slic3r/GUI/SSWCP.hpp"
 #include "slic3r/GUI/DownloadManager.hpp"
 #include "slic3r/Utils/PresetUpdater.hpp"
+#include "slic3r/Utils/OrcaCloudServiceAgent.hpp"
+#include <nlohmann/json.hpp>
 #include "slic3r/Config/Version.hpp"
 #include "libslic3r/MixedFilament.hpp"
 
@@ -1132,7 +1134,7 @@ void GUI_App::post_init()
         // Always async, not such startup step
         // BOOST_LOG_TRIVIAL(info) << "Loading user presets...";
         // scrn->SetText(_L("Loading user presets..."));
-        if (m_agent) {
+        if (m_agent || is_orca_cloud_login()) {
             start_sync_user_preset();
         }
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " sync_user_preset: true";
@@ -1302,6 +1304,11 @@ void GUI_App::shutdown(bool isRecreate)
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": destroy SMlogin dialog");
         delete sm_login_dlg;
         sm_login_dlg = nullptr;
+    }
+
+    if (orca_login_dlg != nullptr) {
+        delete orca_login_dlg;
+        orca_login_dlg = nullptr;
     }
 
     if (web_device_dialog != nullptr) {
@@ -1738,10 +1745,9 @@ void GUI_App::restart_networking()
         if (plater_)
             plater_->get_notification_manager()->bbl_close_plugin_install_notification();
 
-        if (m_agent->is_user_login()) {
-            remove_user_presets();
+        if (is_orca_cloud_login() && !app_config->get_stealth_mode()) {
             enable_user_preset_folder(true);
-            preset_bundle->load_user_presets(m_agent->get_user_id(), ForwardCompatibilitySubstitutionRule::Enable);
+            preset_bundle->load_user_presets(m_orca_cloud->get_user_id(), ForwardCompatibilitySubstitutionRule::Enable);
             mainframe->update_side_preset_ui();
         }
 
@@ -2510,6 +2516,9 @@ int GUI_App::OnExit()
         m_agent = nullptr;
     }
 
+    stop_orca_http_server();
+    m_orca_cloud.reset();
+
     // Orca: clean up encrypted bbl network log file if plugin is used
     // No point to keep them as they are encrypted and can't be used for debugging
     try {
@@ -2937,7 +2946,7 @@ bool GUI_App::on_init_inner()
     on_init_network();
     profiler.mark("on_init_network");
 
-    if (m_agent && m_agent->is_user_login()) {
+    if (is_orca_cloud_login() && !app_config->get_stealth_mode()) {
         enable_user_preset_folder(true);
     } else {
         enable_user_preset_folder(false);
@@ -3420,6 +3429,8 @@ __retry:
     }
 
     profiler.note(std::string("create_network_agent=") + (create_network_agent ? "true" : "false"));
+
+    init_orca_cloud_agent();
 
     return true;
 }
@@ -4081,6 +4092,231 @@ void GUI_App::ShowUserLogin(bool show)
     }
 }
 
+bool GUI_App::is_orca_cloud_login()
+{
+    return m_orca_cloud && m_orca_cloud->is_user_login();
+}
+
+void GUI_App::init_orca_cloud_agent()
+{
+    if (m_orca_cloud)
+        return;
+
+    const std::string data_directory = data_dir();
+    m_orca_cloud = std::make_shared<OrcaCloudServiceAgent>(data_directory);
+    m_orca_cloud->set_config_dir(data_directory);
+    m_orca_cloud->init_log();
+    m_orca_cloud->configure_urls(app_config);
+    m_orca_cloud->set_country_code(app_config->get_country_code());
+    m_orca_cloud->set_queue_on_main_fn([this](std::function<void()> callback) {
+        CallAfter(std::move(callback));
+    });
+    m_orca_cloud->set_on_http_error_fn([this](CloudEvent /*event*/, unsigned status, std::string body) {
+        this->handle_orca_http_error(status, body);
+    });
+    m_orca_cloud->set_on_login_complete_handler([this](bool success, const std::string& /*user_id*/) {
+        if (success)
+            CallAfter([this] { on_orca_cloud_login(); });
+    });
+    m_orca_cloud->start();
+    BOOST_LOG_TRIVIAL(info) << "init_orca_cloud_agent: started, logged_in=" << m_orca_cloud->is_user_login();
+}
+
+void GUI_App::ShowOrcaCloudLogin(bool show)
+{
+    if (show) {
+        if (app_config->get_stealth_mode()) {
+            MessageDialog dlg(mainframe,
+                _L("Stealth mode is enabled, so Orca Cloud will not open.\n\nDisable Stealth mode in Preferences (General) to log in to the Orca Cloud account and sync presets between PCs.\nThe Snapmaker account for binding the U1 is separate and is not affected."),
+                _L("Orca Cloud account"), wxOK | wxICON_INFORMATION);
+            dlg.ShowModal();
+            return;
+        }
+        init_orca_cloud_agent();
+        try {
+            delete orca_login_dlg;
+            orca_login_dlg = new OrcaCloudLoginDialog(m_orca_cloud);
+            orca_login_dlg->ShowModal();
+        } catch (std::exception &) {
+            ;
+        }
+    } else {
+        if (orca_login_dlg)
+            orca_login_dlg->EndModal(wxID_OK);
+    }
+}
+
+void GUI_App::request_orca_cloud_login()
+{
+    if (is_orca_cloud_login()) {
+        MessageDialog dlg(mainframe,
+            _L("Log out of the Orca Cloud account?\nPresets stay on disk; user/<UUID>/ will switch back to default.\nThis does not log out of the Snapmaker account used to bind the U1."),
+            _L("Orca Cloud account"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (dlg.ShowModal() == wxID_YES)
+            request_orca_cloud_logout();
+        return;
+    }
+    ShowOrcaCloudLogin(true);
+}
+
+void GUI_App::request_orca_cloud_logout()
+{
+    if (!is_orca_cloud_login())
+        return;
+
+    bool     transfer_preset_changes = false;
+    wxString header = _L("Some presets are modified.") + "\n" +
+        _L("You can keep the modified presets to the new project, discard or save changes as new presets.");
+    wxGetApp().check_and_keep_current_preset_changes(_L("Orca Cloud logged out"), header, ActionButtons::KEEP | ActionButtons::SAVE, &transfer_preset_changes);
+
+    m_orca_cloud->user_logout(true);
+    stop_sync_user_preset();
+    remove_user_presets();
+    enable_user_preset_folder(false);
+    preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
+    if (mainframe)
+        mainframe->update_side_preset_ui();
+    refresh_account_ui();
+}
+
+void GUI_App::on_orca_cloud_login()
+{
+    if (!is_orca_cloud_login() || app_config->get_stealth_mode())
+        return;
+
+    remove_user_presets();
+    enable_user_preset_folder(true);
+    preset_bundle->load_user_presets(m_orca_cloud->get_user_id(), ForwardCompatibilitySubstitutionRule::Enable);
+    if (mainframe) {
+        mainframe->update_side_preset_ui();
+        mainframe->show_sync_dialog();
+    }
+    if (app_config->get("sync_user_preset") == "true")
+        start_sync_user_preset();
+    refresh_account_ui();
+}
+
+void GUI_App::on_stealth_mode_enter()
+{
+    stop_sync_user_preset();
+    BOOST_LOG_TRIVIAL(info) << "logout: on_stealth_mode_enter";
+    request_orca_cloud_logout();
+    refresh_account_ui();
+}
+
+void GUI_App::refresh_account_ui()
+{
+    if (!mainframe || mainframe->is_shutting_down())
+        return;
+    mainframe->update_account_menu_labels();
+    push_accounts_status_to_homepage();
+}
+
+void GUI_App::push_accounts_status_to_homepage()
+{
+    if (!mainframe || !mainframe->m_webview)
+        return;
+
+    json param;
+    param["command"]     = "accounts_status";
+    param["sequence_id"] = "10002";
+
+    json orca;
+    const bool stealth = app_config && app_config->get_stealth_mode();
+    orca["stealth"]    = stealth;
+    orca["logged_in"]  = is_orca_cloud_login();
+    std::string orca_name;
+    if (is_orca_cloud_login() && m_orca_cloud) {
+        orca_name = m_orca_cloud->get_user_name();
+        if (orca_name.empty())
+            orca_name = m_orca_cloud->get_user_id();
+    }
+    orca["name"]   = orca_name;
+    param["orca"]  = orca;
+
+    json sm;
+    const bool sm_on = m_login_userinfo.is_user_login();
+    sm["logged_in"]  = sm_on;
+    sm["name"]       = sm_on ? m_login_userinfo.get_user_name() : std::string();
+    param["snapmaker"] = sm;
+
+    wxString strJS = wxString::Format("window.postMessage(%s)", param.dump());
+    run_script(strJS);
+}
+
+void GUI_App::request_snapmaker_account_from_ui()
+{
+    if (m_login_userinfo.is_user_login()) {
+        MessageDialog dlg(mainframe,
+            _L("Log out of the Snapmaker account?\nThis unbinds cloud session for the U1. It does not log out of Orca Cloud or drop synced presets."),
+            _L("Snapmaker account"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (dlg.ShowModal() == wxID_YES) {
+            sm_request_user_logout();
+            sm_get_login_info();
+            refresh_account_ui();
+        }
+        return;
+    }
+    sm_request_login(true);
+    refresh_account_ui();
+}
+
+void GUI_App::handle_orca_http_error(unsigned int status, std::string body)
+{
+    BOOST_LOG_TRIVIAL(warning) << "Orca Cloud HTTP error status=" << status << " body=" << body.substr(0, 256);
+    if (status == 401) {
+        CallAfter([this] {
+            if (is_orca_cloud_login())
+                request_orca_cloud_logout();
+        });
+        return;
+    }
+    if (status == 409) {
+        CallAfter([this] {
+            if (!mainframe) return;
+            MessageDialog dlg(mainframe,
+                _L("This preset has a newer version in Orca Cloud, or a preset with this name already exists.\nSync Presets to pull the cloud copy, or save as a new name."),
+                _L("Orca Cloud"), wxOK | wxICON_WARNING);
+            dlg.ShowModal();
+        });
+    }
+}
+
+void GUI_App::handle_orca_cloud_script_message(const std::string& msg)
+{
+    if (!m_orca_cloud)
+        return;
+    m_orca_cloud->change_user(msg);
+    if (m_orca_cloud->is_user_login())
+        on_orca_cloud_login();
+}
+
+void GUI_App::start_orca_http_server(int port)
+{
+    if (port <= 0)
+        port = 41172;
+    if (m_orca_http_server.is_started() && m_orca_http_server.get_port() != static_cast<boost::asio::ip::port_type>(port))
+        m_orca_http_server.stop();
+    m_orca_http_server.setPort(static_cast<boost::asio::ip::port_type>(port));
+    m_orca_http_server.set_request_handler([](const std::string& url) {
+        return HttpServer::orca_auth_handle_request(url);
+    });
+    if (!m_orca_http_server.is_started())
+        m_orca_http_server.start();
+}
+
+void GUI_App::stop_orca_http_server()
+{
+    if (m_orca_http_server.is_started())
+        m_orca_http_server.stop();
+}
+
+void GUI_App::restart_sync_user_preset()
+{
+    stop_sync_user_preset();
+    start_sync_user_preset(true);
+}
+
 
 void GUI_App::ShowOnlyFilament() {
     // BBS:Show NewUser Guide
@@ -4324,6 +4560,7 @@ void GUI_App::sm_get_login_info() {
         GUI::wxGetApp().run_script(strJS);
     }
     mainframe->m_webview->SetLoginPanelVisibility(true);
+    refresh_account_ui();
 }
 
 void GUI_App::sm_request_login(bool show_user_info)
@@ -4401,6 +4638,7 @@ void GUI_App::sm_request_user_logout()
     } catch (std::exception&) {
         ;
     }
+    refresh_account_ui();
 }
 
 void GUI_App::start_flutter_wcp_timeout_watch()
@@ -4622,12 +4860,14 @@ void GUI_App::request_user_logout()
 
         m_device_manager->clean_user_info();
         GUI::wxGetApp().sidebar().load_ams_list({}, {});
-        remove_user_presets();
-        enable_user_preset_folder(false);
-        preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
-        mainframe->update_side_preset_ui();
-
-        GUI::wxGetApp().stop_sync_user_preset();
+        // Preset UUID folder belongs to Orca Cloud, not the Bambu NetworkAgent session.
+        if (!is_orca_cloud_login()) {
+            remove_user_presets();
+            enable_user_preset_folder(false);
+            preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
+            mainframe->update_side_preset_ui();
+            GUI::wxGetApp().stop_sync_user_preset();
+        }
     }
 }
 
@@ -4677,16 +4917,29 @@ std::string GUI_App::handle_web_request(std::string cmd)
             else if (command_str.compare("get_login_info") == 0) {
                 CallAfter([this] {
                         get_login_info();
+                        refresh_account_ui();
                     });
+            }
+            else if (command_str.compare("homepage_orca_cloud") == 0) {
+                CallAfter([this] {
+                    this->request_orca_cloud_login();
+                });
+            }
+            else if (command_str.compare("homepage_snapmaker_account") == 0) {
+                CallAfter([this] {
+                    this->request_snapmaker_account_from_ui();
+                });
             }
             else if (command_str.compare("homepage_login_or_register") == 0) {
                 CallAfter([this] {
-                    this->request_login(true);
+                    // Home login is the Snapmaker account (U1 bind), not Orca Cloud.
+                    this->request_snapmaker_account_from_ui();
                 });
             }
             else if (command_str.compare("homepage_logout") == 0) {
                 CallAfter([this] {
-                    wxGetApp().request_user_logout();
+                    wxGetApp().sm_request_user_logout();
+                    wxGetApp().sm_get_login_info();
                 });
             }
             else if (command_str.compare("homepage_modeldepot") == 0) {
@@ -4956,10 +5209,11 @@ void GUI_App::on_http_error(wxCommandEvent &evt)
 
 void GUI_App::enable_user_preset_folder(bool enable)
 {
-    if (enable) {
-        std::string user_id = m_agent->get_user_id();
+    if (enable && m_orca_cloud && m_orca_cloud->is_user_login()) {
+        std::string user_id = m_orca_cloud->get_user_id();
         app_config->set("preset_folder", user_id);
         GUI::wxGetApp().preset_bundle->update_user_presets_directory(user_id);
+        BOOST_LOG_TRIVIAL(info) << "preset_folder: Orca Cloud user " << user_id;
     } else {
         BOOST_LOG_TRIVIAL(info) << "preset_folder: set to empty";
         app_config->set("preset_folder", "");
@@ -5526,20 +5780,24 @@ void  GUI_App::push_notification(wxString msg, wxString title, UserNotificationS
 
 void GUI_App::reload_settings()
 {
-    if (preset_bundle && m_agent) {
-        std::map<std::string, std::map<std::string, std::string>> user_presets;
+    if (!preset_bundle) return;
+    std::map<std::string, std::map<std::string, std::string>> user_presets;
+    if (m_orca_cloud && m_orca_cloud->is_user_login())
+        m_orca_cloud->get_user_presets(&user_presets);
+    else if (m_agent)
         m_agent->get_user_presets(&user_presets);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " cloud user preset number is: " << user_presets.size();
-        preset_bundle->load_user_presets(*app_config, user_presets, ForwardCompatibilitySubstitutionRule::Enable);
-        preset_bundle->save_user_presets(*app_config, get_delete_cache_presets());
-        mainframe->update_side_preset_ui();
-    }
+    else
+        return;
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " cloud user preset number is: " << user_presets.size();
+    preset_bundle->load_user_presets(*app_config, user_presets, ForwardCompatibilitySubstitutionRule::Enable);
+    preset_bundle->save_user_presets(*app_config, get_delete_cache_presets());
+    mainframe->update_side_preset_ui();
 }
 
 //BBS reload when logout
 void GUI_App::remove_user_presets()
 {
-    if (preset_bundle && m_agent) {
+    if (preset_bundle && (m_agent || is_orca_cloud_login())) {
         preset_bundle->remove_users_preset(*app_config);
 
         // Not remove user preset cache
@@ -5560,6 +5818,7 @@ void GUI_App::sync_preset(Preset* preset)
     // only sync user's preset
     if (!preset->is_user()) return;
     if (preset->is_custom_defined()) return;
+    if (!((m_orca_cloud && m_orca_cloud->is_user_login()) || m_agent)) return;
 
     auto setting_id = preset->setting_id;
     std::map<std::string, std::string> values_map;
@@ -5568,7 +5827,9 @@ void GUI_App::sync_preset(Preset* preset)
             return;
         int ret = preset_bundle->get_differed_values_to_update(*preset, values_map);
         if (!ret) {
-            std::string new_setting_id = m_agent->request_setting_id(preset->name, &values_map, &http_code);
+            std::string new_setting_id = (m_orca_cloud && m_orca_cloud->is_user_login())
+                ? m_orca_cloud->request_setting_id(preset->name, &values_map, &http_code)
+                : m_agent->request_setting_id(preset->name, &values_map, &http_code);
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
@@ -5597,7 +5858,9 @@ void GUI_App::sync_preset(Preset* preset)
             return;
         int ret = preset_bundle->get_differed_values_to_update(*preset, values_map);
         if (!ret) {
-            std::string new_setting_id = m_agent->request_setting_id(preset->name, &values_map, &http_code);
+            std::string new_setting_id = (m_orca_cloud && m_orca_cloud->is_user_login())
+                ? m_orca_cloud->request_setting_id(preset->name, &values_map, &http_code)
+                : m_agent->request_setting_id(preset->name, &values_map, &http_code);
             if (!new_setting_id.empty()) {
                 setting_id = new_setting_id;
                 result = 0;
@@ -5627,7 +5890,9 @@ void GUI_App::sync_preset(Preset* preset)
                     result = 0;
                 }
                 else {
-                    result = m_agent->put_setting(setting_id, preset->name, &values_map, &http_code);
+                    result = (m_orca_cloud && m_orca_cloud->is_user_login())
+                        ? m_orca_cloud->put_setting(setting_id, preset->name, &values_map, &http_code)
+                        : m_agent->put_setting(setting_id, preset->name, &values_map, &http_code);
                     if (http_code >= 400) {
                         result = 0;
                         updated_info = "hold";
@@ -5688,7 +5953,8 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
     if (app_config->get_stealth_mode())
         return;
 
-    if (!m_agent || !m_agent->is_user_login()) return;
+    const bool orca_logged = is_orca_cloud_login();
+    if (!orca_logged && (!m_agent || !m_agent->is_user_login())) return;
 
     // has already start sync
     if (m_user_sync_token) return;
@@ -5711,17 +5977,17 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
         cancelFn = [this, dlg]() {
             return m_is_closing || dlg->WasCanceled();
         };
-        finishFn = [this, userid = m_agent->get_user_id(), dlg, t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
+        finishFn = [this, userid = (m_orca_cloud && m_orca_cloud->is_user_login() ? m_orca_cloud->get_user_id() : (m_agent ? m_agent->get_user_id() : std::string())), dlg, t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
             CallAfter([=]{
                 dlg->Destroy();
-                if (ok && m_agent && t.lock() == m_user_sync_token && userid == m_agent->get_user_id()) reload_settings();
+                if (ok && t.lock() == m_user_sync_token) reload_settings();
             });
         };
     }
     else {
-        finishFn = [this, userid = m_agent->get_user_id(), t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
+        finishFn = [this, userid = (m_orca_cloud && m_orca_cloud->is_user_login() ? m_orca_cloud->get_user_id() : (m_agent ? m_agent->get_user_id() : std::string())), t = std::weak_ptr<int>(m_user_sync_token)](bool ok) {
             CallAfter([=] {
-                if (ok && m_agent && t.lock() == m_user_sync_token && userid == m_agent->get_user_id()) reload_settings();
+                if (ok && t.lock() == m_user_sync_token) reload_settings();
             });
         };
     }
@@ -5730,7 +5996,7 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
         [this, progressFn, cancelFn, finishFn, t = std::weak_ptr<int>(m_user_sync_token)] {
             // get setting list, update setting list
             std::string version = preset_bundle->get_vendor_profile_version(PresetBundle::SM_BUNDLE).to_string();
-            int ret = m_agent->get_setting_list2(version, [this](auto info) {
+            auto need_sync_fn = [this](auto info) {
                 auto type = info[BBL_JSON_KEY_TYPE];
                 auto name = info[BBL_JSON_KEY_NAME];
                 auto setting_id = info[BBL_JSON_KEY_SETTING_ID];
@@ -5747,7 +6013,12 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                 } else {
                     return true;
                 }
-            }, progressFn, cancelFn);
+            };
+            int ret = -1;
+            if (m_orca_cloud && m_orca_cloud->is_user_login())
+                ret = m_orca_cloud->get_setting_list2(version, need_sync_fn, progressFn, cancelFn);
+            else if (m_agent)
+                ret = m_agent->get_setting_list2(version, need_sync_fn, progressFn, cancelFn);
             finishFn(ret == 0);
 
             int count = 0, sync_count = 0;
@@ -5755,8 +6026,8 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
             while (!t.expired()) {
                 count++;
                 if (count % 20 == 0) {
-                    if (m_agent) {
-                        if (!m_agent->is_user_login()) {
+                    const bool cloud_ok = (m_orca_cloud && m_orca_cloud->is_user_login()) || (m_agent && m_agent->is_user_login());
+                    if (!cloud_ok) {
                             continue;
                         }
                         //sync preset
@@ -5804,7 +6075,9 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                         for (auto it = delete_cache_presets.begin(); it != delete_cache_presets.end();) {
                             if ((*it).empty()) continue;
                             std::string del_setting_id = *it;
-                            int result = m_agent->delete_setting(del_setting_id);
+                            int result = (m_orca_cloud && m_orca_cloud->is_user_login())
+                                ? m_orca_cloud->delete_setting(del_setting_id)
+                                : m_agent->delete_setting(del_setting_id);
                             if (result == 0) {
                                 preset_deleted_from_cloud(del_setting_id);
                                 it = delete_cache_presets.erase(it);
@@ -5816,7 +6089,6 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                                 it++;
                             }
                         }
-                    }
                 } else {
                     boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
                 }
@@ -7759,7 +8031,10 @@ void GUI_App::SMUserInfo::notify() {
     }
 
     wxGetApp().user_login_notify(data);
-
+    wxGetApp().CallAfter([] {
+        if (wxGetApp().mainframe && !wxGetApp().mainframe->is_shutting_down())
+            wxGetApp().refresh_account_ui();
+    });
 }
 bool is_support_filament(int extruder_id)
 {

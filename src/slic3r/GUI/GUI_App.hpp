@@ -14,6 +14,7 @@
 #include "slic3r/GUI/WebViewDialog.hpp"
 #include "slic3r/GUI/WebUserLoginDialog.hpp"
 #include "slic3r/GUI/WebSMUserLoginDialog.hpp"
+#include "slic3r/GUI/OrcaCloudLoginDialog.hpp"
 #include "slic3r/GUI/WebDeviceDialog.hpp"
 #include "slic3r/GUI/WebPreprintDialog.hpp"
 #include "slic3r/GUI/BindDialog.hpp"
@@ -75,6 +76,7 @@ class Model;
 class UserManager;
 class DeviceManager;
 class NetworkAgent;
+class OrcaCloudServiceAgent;
 class TaskManager;
 
 namespace GUI{
@@ -251,17 +253,11 @@ public:
 private:
     bool            m_initialized { false };
     bool            m_post_initialized { false };
-    // Set when a snapmaker-orca:// URL is handed to us after launch (macOS delivers these
-    // through MacOpenURL rather than argv, so post_init cannot see them in input_files).
-    // post_init must not start a blank project in that case, or it discards the model the
-    // URL is in the middle of loading.
     bool            m_url_open_pending { false };
     bool            m_app_conf_exists{ false };
     EAppMode        m_app_mode{ EAppMode::Editor };
     bool            m_is_recreating_gui{ false };
-    /// Set only for the duration of `MsgUpdateConfig::ShowModal()` in load_flutter_web (atomic: safe vs updater threads + CallAfter).
     std::atomic<bool> m_flutter_web_config_update_dlg_open{ false };
-    /// Set only for the duration of profile/preset `MsgUpdateConfig::ShowModal()` (atomic: safe vs updater threads + CallAfter).
     std::atomic<bool> m_profile_config_update_dlg_open{ false };
 #ifdef __linux__
     bool            m_opengl_initialized{ false };
@@ -284,54 +280,50 @@ private:
     bool            m_force_colors_update { false };
 //#endif
 
-    wxFont		    m_small_font;
-    wxFont		    m_bold_font;
-	wxFont			m_normal_font;
-	wxFont			m_code_font;
-    wxFont		    m_link_font;
+    wxFont          m_small_font;
+    wxFont          m_bold_font;
+    wxFont          m_normal_font;
+    wxFont          m_code_font;
+    wxFont          m_link_font;
 
-    int             m_em_unit; // width of a "m"-symbol in pixels for current system font
-                               // Note: for 100% Scale m_em_unit = 10 -> it's a good enough coefficient for a size setting of controls
+    int             m_em_unit;
 
-    std::unique_ptr<wxLocale> 	  m_wxLocale;
-    // System language, from locales, owned by wxWidgets.
-    const wxLanguageInfo		 *m_language_info_system = nullptr;
-    // Best translation language, provided by Windows or OSX, owned by wxWidgets.
-    const wxLanguageInfo		 *m_language_info_best   = nullptr;
+    std::unique_ptr<wxLocale>     m_wxLocale;
+    const wxLanguageInfo         *m_language_info_system = nullptr;
+    const wxLanguageInfo         *m_language_info_best   = nullptr;
 
     OpenGLManager m_opengl_mgr;
     std::unique_ptr<RemovableDriveManager> m_removable_drive_manager;
 
     std::unique_ptr<ImGuiWrapper> m_imgui;
     std::unique_ptr<PrintHostJobQueue> m_printhost_job_queue;
-	std::unique_ptr <OtherInstanceMessageHandler> m_other_instance_message_handler;
+    std::unique_ptr <OtherInstanceMessageHandler> m_other_instance_message_handler;
     std::unique_ptr <wxSingleInstanceChecker> m_single_instance_checker;
     std::string m_instance_hash_string;
-	size_t m_instance_hash_int;
+    size_t m_instance_hash_int;
 
     std::unique_ptr<Downloader> m_downloader;
     DownloadManager* m_download_manager;
 
-    //BBS
     bool m_is_closing {false};
     Slic3r::DeviceManager* m_device_manager { nullptr };
     Slic3r::UserManager* m_user_manager { nullptr };
     Slic3r::TaskManager* m_task_manager { nullptr };
     NetworkAgent* m_agent { nullptr };
-    std::vector<std::string> need_delete_presets;   // store setting ids of preset
-    std::vector<bool> m_create_preset_blocked { false, false, false, false, false, false }; // excceed limit
+    std::shared_ptr<OrcaCloudServiceAgent> m_orca_cloud;
+    std::vector<std::string> need_delete_presets;
+    std::vector<bool> m_create_preset_blocked { false, false, false, false, false, false };
     bool m_networking_compatible { false };
     bool m_networking_need_update { false };
     bool m_networking_cancel_update { false };
     std::shared_ptr<UpgradeNetworkJob> m_upgrade_network_job;
 
-    // login widget
     ZUserLogin*     login_dlg { nullptr };
     SMUserLogin*    sm_login_dlg{ nullptr };
+    OrcaCloudLoginDialog* orca_login_dlg{ nullptr };
 
 
 public:
-    // device dialog
     WebDeviceDialog* web_device_dialog{ nullptr };
     WebPreprintDialog* web_preprint_dialog{ nullptr };
 
@@ -348,7 +340,7 @@ private:
     bool             m_side_popup_status{false};
     bool             m_show_http_errpr_msgdlg{false};
     wxString         m_info_dialog_content;
-    //HttpServer       m_http_server;
+    HttpServer       m_orca_http_server;
 
 public:
     HttpServer       m_page_http_server;
@@ -393,7 +385,6 @@ private:
     wxDialog* get_web_device_dialog() { return web_device_dialog; }
     void                       set_web_preprint_dialog(WebPreprintDialog* obj) { web_preprint_dialog = obj; }
     wxDialog*                  get_web_preprint_dialog() { return web_preprint_dialog; }
-      //try again when subscription fails
     void            on_start_subscribe_again(std::string dev_id);
     void            check_filaments_in_blacklist(std::string tag_supplier, std::string tag_material, bool& in_blacklist, std::string& action, std::string& info);
     std::string     get_local_models_path();
@@ -404,9 +395,7 @@ private:
 
     std::map<std::string, bool> test_url_state;
 
-    //BBS: remove GCodeViewer as seperate APP logic
     explicit GUI_App();
-    //explicit GUI_App(EAppMode mode = EAppMode::Editor);
     ~GUI_App() override;
 
     void                   machine_find();
@@ -416,6 +405,7 @@ private:
     Slic3r::TaskManager*   getTaskManager() { return m_task_manager; }
     HMSQuery* get_hms_query() { return hms_query; }
     NetworkAgent* getAgent() { return m_agent; }
+    std::shared_ptr<OrcaCloudServiceAgent> getOrcaCloud() { return m_orca_cloud; }
     bool is_editor() const { return m_app_mode == EAppMode::Editor; }
     bool is_gcode_viewer() const { return m_app_mode == EAppMode::GCodeViewer; }
     bool is_recreating_gui() const { return m_is_recreating_gui; }
@@ -431,7 +421,6 @@ private:
     void set_profile_config_update_dlg_open(bool v) { m_profile_config_update_dlg_open.store(v, std::memory_order_release); }
     std::string logo_name() const { return is_editor() ? "Snapmaker_Orca" : "Snapmaker_Orca-gcodeviewer"; }
     
-    // SoftFever
     bool show_gcode_window() const { return m_show_gcode_window; }
     void toggle_show_gcode_window();
 
@@ -449,13 +438,8 @@ private:
                                                Slic3r::NozzleType nozzle_type = Slic3r::NozzleType::ntUndefine) const;
     bool            is_nozzle_filament_warning(const std::string& nozzle_key, const std::string& filament_preset_name,
                                                Slic3r::NozzleType nozzle_type = Slic3r::NozzleType::ntUndefine) const;
-    // To be called after the GUI is fully built up.
-    // Process command line parameters cached in this->init_params,
-    // load configs, STLs etc.
     void            post_init();
     void            shutdown(bool isRecreate = false);
-    // If formatted for github, plaintext with OpenGL extensions enclosed into <details>.
-    // Otherwise HTML formatted for the system info dialog.
     static std::string get_gl_info(bool for_github);
     wxGLContext*    init_glcontext(wxGLCanvas& canvas);
     bool            init_opengl();
@@ -473,22 +457,17 @@ private:
     void            update_publish_status();
     bool            has_model_mall();
     void            update_label_colours();
-    // update color mode for window
     void            UpdateDarkUI(wxWindow *window, bool highlited = false, bool just_font = false);
     void            UpdateDarkUIWin(wxWindow* win);
     void            Update_dark_mode_flag();
-    // update color mode for whole dialog including all children
     void            UpdateDlgDarkUI(wxDialog* dlg);
     void            UpdateFrameDarkUI(wxFrame* dlg);
-    // update color mode for DataViewControl
     void            UpdateDVCDarkUI(wxDataViewCtrl* dvc, bool highlited = false);
-    // update color mode for panel including all static texts controls
     void            UpdateAllStaticTextDarkUI(wxWindow* parent);
     void            init_fonts();
-	void            update_fonts(const MainFrame *main_frame = nullptr);
+    void            update_fonts(const MainFrame *main_frame = nullptr);
     void            set_label_clr_modified(const wxColour& clr);
     void            set_label_clr_sys(const wxColour& clr);
-    //update side popup status
     bool            get_side_menu_popup_status();
     void            set_side_menu_popup_status(bool status);
     void            link_to_network_check();
@@ -499,8 +478,6 @@ private:
     const wxColour& get_label_clr_default() { return m_color_label_default; }
     const wxColour& get_window_default_clr(){ return m_color_window_default; }
 
-    // BBS
-//#ifdef _WIN32
     const wxColour& get_label_highlight_clr()   { return m_color_highlight_label_default; }
     const wxColour& get_highlight_default_clr() { return m_color_highlight_default; }
     const wxColour& get_color_hovered_btn_label() { return m_color_hovered_btn_label; }
@@ -508,8 +485,7 @@ private:
     void            force_colors_update();
 #ifdef _MSW_DARK_MODE
     void            force_menu_update();
-#endif //_MSW_DARK_MODE
-//#endif
+#endif
 
     const wxFont&   small_font()            { return m_small_font; }
     const wxFont&   bold_font()             { return m_bold_font; }
@@ -536,16 +512,16 @@ private:
     void            ShowUserGuide();
     void            ShowDownNetPluginDlg();
     void            ShowUserLogin(bool show = true);
+    void            ShowOrcaCloudLogin(bool show = true);
     void            ShowOnlyFilament();
-    //BBS
     void            request_login(bool show_user_info = false);
     bool            check_login();
     void            get_login_info();
     bool            is_user_login();
+    bool            is_orca_cloud_login();
 
     wxString get_international_url(const wxString& origin_url);
 
-    // SM
     struct SMUserInfo
     {
     public:
@@ -599,14 +575,22 @@ private:
     void            on_flutter_wcp_received();
     void            report_flutter_run_result_once(bool success);
 
-    // Silent login-token maintenance: the Snapmaker access token expires after
-    // ~24 h; a hidden login webview re-runs the cookie session and picks up a
-    // fresh token without user interaction.
-    void            sm_maybe_refresh_login_token();  // due-check + guards; main thread
-    void            sm_on_token_captured(std::size_t refresh_generation); // call on every token acquisition
-    void            sm_stop_silent_token_refresh();  // drop an in-flight silent refresh
+    void            sm_maybe_refresh_login_token();
+    void            sm_on_token_captured(std::size_t refresh_generation);
+    void            sm_stop_silent_token_refresh();
     bool            sm_is_token_refresh_current(std::size_t refresh_generation) const;
     std::size_t     sm_token_refresh_generation() const { return m_silent_refresh_generation; }
+
+    void            init_orca_cloud_agent();
+    void            request_orca_cloud_login();
+    void            request_orca_cloud_logout();
+    void            on_orca_cloud_login();
+    void            on_stealth_mode_enter();
+    void            handle_orca_http_error(unsigned int status, std::string body);
+    void            handle_orca_cloud_script_message(const std::string& msg);
+    void            refresh_account_ui();
+    void            push_accounts_status_to_homepage();
+    void            request_snapmaker_account_from_ui();
 
     void            request_user_logout();
     int             request_user_unbind(std::string dev_id);
@@ -622,7 +606,6 @@ private:
     void            on_http_error(wxCommandEvent &evt);
     void            enable_user_preset_folder(bool enable);
 
-    // BBS
     bool            is_studio_active();
     void            reset_to_active();
     bool            m_studio_active = true;
@@ -644,17 +627,15 @@ private:
     void            sync_preset(Preset* preset);
     void            start_sync_user_preset(bool with_progress_dlg = false);
     void            stop_sync_user_preset();
-    //void            start_http_server();
-    //void            stop_http_server();
+    void            restart_sync_user_preset();
+    void            start_orca_http_server(int port = 0);
+    void            stop_orca_http_server();
 
-    // page loading http server
     void            start_page_http_server();
     void            stop_page_http_server();
-    /// Actual listen port (may differ from PAGE_HTTP_PORT if the default was in use).
     boost::asio::ip::port_type get_page_http_port() const { return m_page_http_server.get_port(); }
 
     enum class FlutterWebCopyStatus { Ok, UpgradeFailed, InstallFailed, Other };
-    /// Copy bundled flutter_web into the user data directory. On failure, records status for deferred user notification.
     bool            copy_bundled_flutter_web(bool upgrade);
     void            report_flutter_web_copy_failure(FlutterWebCopyStatus status);
     void            try_notify_flutter_web_copy_failure();
@@ -677,16 +658,13 @@ private:
     Tab*            get_layer_tab();
     ConfigOptionMode get_mode();
     std::string     get_mode_str();
-    void            save_mode(const /*ConfigOptionMode*/int mode) ;
+    void            save_mode(const int mode) ;
     void            update_mode();
     void            update_internal_development();
     void            show_ip_address_enter_dialog(wxString title = wxEmptyString);
     void            show_ip_address_enter_dialog_handler(wxCommandEvent &evt);
     bool            show_modal_ip_address_enter_dialog(wxString title = wxEmptyString);
 
-    // BBS
-    //void            add_config_menu(wxMenuBar *menu);
-    //void            add_config_menu(wxMenu* menu);
     bool            has_unsaved_preset_changes() const;
     bool            has_current_preset_changes() const;
     void            update_saved_preset_from_current_preset();
@@ -697,7 +675,6 @@ private:
     bool            can_load_project();
     bool            check_print_host_queue();
     bool            checked_tab(Tab* tab);
-    //BBS: add preset combox re-active logic
     void            load_current_presets(bool active_preset_combox = false, bool check_printer_presets = true);
     std::vector<std::string> &get_delete_cache_presets();
     std::vector<std::string> get_delete_cache_presets_lock();
@@ -706,21 +683,18 @@ private:
 
     wxString        filter_string(wxString str);
     wxString        current_language_code() const { return m_wxLocale->GetCanonicalName(); }
-	// Translate the language code to a code, for which Prusa Research maintains translations. Defaults to "en_US".
-    wxString 		current_language_code_safe() const;
+    wxString        current_language_code_safe() const;
     bool            is_localized() const { return m_wxLocale->GetLocale() != "English"; }
 
     void            open_preferences(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
 
     virtual bool OnExceptionInMainLoop() override;
-    // Calls wxLaunchDefaultBrowser if user confirms in dialog.
     bool            open_browser_with_warning_dialog(const wxString& url, int flags = 0);
 #ifdef __APPLE__
     void            OSXStoreOpenFiles(const wxArrayString &files);
-    // wxWidgets override to get an event on open files.
     void            MacOpenFiles(const wxArrayString &fileNames) override;
     void            MacOpenURL(const wxString& url) override;
-#endif /* __APPLE */
+#endif
 
     Sidebar&             sidebar();
     GizmoObjectManipulation *obj_manipul();
@@ -731,7 +705,7 @@ private:
     const Plater*        plater() const;
     ParamsPanel*         params_panel();
     ParamsDialog*        params_dialog();
-    Model&      		 model();
+    Model&               model();
     NotificationManager * notification_manager();
     Downloader*          downloader();
     DownloadManager*  download_manager();
@@ -768,7 +742,6 @@ private:
     void            popup_ping_bind_dialog();
     void            remove_ping_bind_dialog();
 
-    // Parameters extracted from the command line to be passed to GUI after initialization.
     GUI_InitParams* init_params { nullptr };
 
     AppConfig*      app_config{ nullptr };
@@ -778,13 +751,12 @@ private:
     Plater*         plater_{ nullptr };
     UpdateVersionDialog* m_updateDialog{nullptr};
 
-	PresetUpdater*  get_preset_updater() { return preset_updater; }
+    PresetUpdater*  get_preset_updater() { return preset_updater; }
 
     Notebook*       tab_panel() const ;
     int             extruders_cnt() const;
     int             extruders_edited_cnt() const;
 
-    // BBS
     int             filaments_cnt() const;
     PrintSequence   global_print_sequence() const;
 
@@ -792,14 +764,14 @@ private:
     std::vector<Tab *>      model_tabs_list;
     Tab*                    plate_tab;
 
-	RemovableDriveManager* removable_drive_manager() { return m_removable_drive_manager.get(); }
-	OtherInstanceMessageHandler* other_instance_message_handler() { return m_other_instance_message_handler.get(); }
+    RemovableDriveManager* removable_drive_manager() { return m_removable_drive_manager.get(); }
+    OtherInstanceMessageHandler* other_instance_message_handler() { return m_other_instance_message_handler.get(); }
     wxSingleInstanceChecker* single_instance_checker() {return m_single_instance_checker.get();}
 
-	void        init_single_instance_checker(const std::string &name, const std::string &path);
-	void        set_instance_hash (const size_t hash) { m_instance_hash_int = hash; m_instance_hash_string = std::to_string(hash); }
+    void        init_single_instance_checker(const std::string &name, const std::string &path);
+    void        set_instance_hash (const size_t hash) { m_instance_hash_int = hash; m_instance_hash_string = std::to_string(hash); }
     std::string get_instance_hash_string ()           { return m_instance_hash_string; }
-	size_t      get_instance_hash_int ()              { return m_instance_hash_int; }
+    size_t      get_instance_hash_int ()              { return m_instance_hash_int; }
 
     ImGuiWrapper* imgui() { return m_imgui.get(); }
 
@@ -811,9 +783,8 @@ private:
     void            show_desktop_integration_dialog();
 
 #if ENABLE_THUMBNAIL_GENERATOR_DEBUG
-    // temporary and debug only -> extract thumbnails from selected gcode and save them as png files
     void            gcode_thumbnails_debug();
-#endif // ENABLE_THUMBNAIL_GENERATOR_DEBUG
+#endif
 
     OpenGLManager& get_opengl_manager() { return m_opengl_mgr; }
     GLShaderProgram* get_shader(const std::string& shader_name) { return m_opengl_mgr.get_shader(shader_name); }
@@ -823,14 +794,12 @@ private:
     bool is_glsl_version_greater_or_equal_to(unsigned int major, unsigned int minor) const { return m_opengl_mgr.get_gl_info().is_glsl_version_greater_or_equal_to(major, minor); }
     int  GetSingleChoiceIndex(const wxString& message, const wxString& caption, const wxArrayString& choices, int initialSelection);
 
-    // extend is stl/3mf/gcode/step etc 
     void            associate_files(std::wstring extend);
     void            disassociate_files(std::wstring extend);
     bool            check_url_association(std::wstring url_prefix, std::wstring& reg_bin);
     void            associate_url(std::wstring url_prefix);
     void            disassociate_url(std::wstring url_prefix);
 
-    // URL download - PrusaSlicer gets system call to open prusaslicer:// URL which should contain address of download
     void            start_download(std::string url);
 
     std::string     get_plugin_url(std::string name, std::string country_code);
@@ -852,7 +821,6 @@ private:
     void            init_networking_callbacks();
     void            init_app_config();
     void            remove_old_networking_plugins();
-    //BBS set extra header for http request
     std::map<std::string, std::string> get_extra_header();
     void            init_http_extra_header();
     void            update_http_extra_header();
@@ -867,7 +835,7 @@ private:
     bool            select_language();
 
     bool            config_wizard_startup();
-	void            check_updates(const bool verbose);
+    void            check_updates(const bool verbose);
 
     bool                    m_init_app_config_from_older { false };
     bool                    m_datadir_redefined { false };
@@ -883,11 +851,10 @@ private:
     std::string             m_open_method;
     SMUserInfo m_login_userinfo;
 
-    // --- Silent login-token refresh bookkeeping (see sm_maybe_refresh_login_token) ---
-    static constexpr int SM_TOKEN_REFRESH_INTERVAL_H = 12;           // refresh cadence, well inside the 24 h token lifetime
-    static constexpr int SM_TOKEN_REFRESH_RETRY_MIN  = 30;           // min wait after a failed attempt
-    static constexpr int SM_TOKEN_REFRESH_TIMEOUT_S  = 120;          // give up on a single silent attempt
-    static constexpr int SM_TOKEN_CHECK_INTERVAL_MS  = 5 * 60 * 1000; // periodic due-check tick
+    static constexpr int SM_TOKEN_REFRESH_INTERVAL_H = 12;
+    static constexpr int SM_TOKEN_REFRESH_RETRY_MIN  = 30;
+    static constexpr int SM_TOKEN_REFRESH_TIMEOUT_S  = 120;
+    static constexpr int SM_TOKEN_CHECK_INTERVAL_MS  = 5 * 60 * 1000;
 
     std::chrono::system_clock::time_point m_token_last_refresh_success{};
     std::chrono::system_clock::time_point m_token_last_refresh_attempt{};
@@ -920,7 +887,6 @@ public:
     void user_login_notify(const json& res);
     void device_card_notify(const json& res);
     void page_state_notify_webview(wxWebView* webview, const std::string& state);
-    // Push foreground/background state change to all subscribed webview instances
     void notify_foreground_change(const bool active);
     void cache_notify(const std::string& key, const json& res);
     void user_update_privacy_notify(const bool& res);

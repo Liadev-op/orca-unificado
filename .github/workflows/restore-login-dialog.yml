@@ -1,0 +1,45 @@
+name: Restore OrcaCloudLoginDialog
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m1-orca-cloud-a90c
+    paths:
+      - ".github/workflows/restore-login-dialog.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m1-orca-cloud-a90c
+          fetch-depth: 30
+      - name: Restore full cpp and fix include
+        run: |
+          set -euo pipefail
+          git show ec1c31cc62bbb6614afcd5f2fdccd29ac6b5299a:src/slic3r/GUI/OrcaCloudLoginDialog.cpp > /tmp/orig.cpp
+          wc -c /tmp/orig.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          t = Path('/tmp/orig.cpp').read_text()
+          old = '#include "libslic3r_version.h"'
+          new = '#include "common_func/common_func.hpp"'
+          if old not in t:
+              raise SystemExit('expected include missing in parent blob')
+          if len(t.encode()) < 10000:
+              raise SystemExit('parent blob too small')
+          t = t.replace(old, new, 1)
+          Path('src/slic3r/GUI/OrcaCloudLoginDialog.cpp').write_text(t)
+          print('wrote', len(t.encode()), 'bytes')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/slic3r/GUI/OrcaCloudLoginDialog.cpp
+          git diff --cached --stat
+          git commit -m 'fix: restore OrcaCloudLoginDialog.cpp and include common_func.hpp'
+          git push origin HEAD:cursor/m1-orca-cloud-a90c

@@ -1209,17 +1209,18 @@ wxWindow* PreferencesDialog::create_general_page()
     std::vector<wxString> Regions         = {_L("Asia-Pacific"), _L("Chinese Mainland"), _L("Europe"), _L("North America"), _L("Others")};
     auto                  item_region= create_item_region_combobox(_L("Login Region"), page, _L("Login Region"), Regions);
 
-    // SM Beta: temporarily open the item_stealth_mode and close the network plugin
-
-    /*auto item_stealth_mode = create_item_checkbox(_L("Stealth mode"), page, _L("This stops the transmission of data to Bambu's cloud services. Users who don't use BBL machines or use LAN mode only can safely turn on this function."), 50, "stealth_mode");
-    /*auto item_stealth_mode = create_item_checkbox(_L("Stealth mode"), page, _L("This stops the transmission of data to Bambu's cloud services. Users who don't use BBL machines or use LAN mode only can safely turn on this function."), 50, "stealth_mode");
+    auto item_stealth_mode = create_item_checkbox(_L("Stealth mode"), page,
+        _L("Stealth mode turns off Orca Cloud: File → Orca Cloud account will not open, and preset sync between PCs is disabled. Turn it off here if Cloud login does nothing.\nThis is not the Snapmaker account. Device / U1 bind still uses the Snapmaker login."),
+        50, "stealth_mode",
+        [](bool new_val, bool /*old_val*/) {
+            if (new_val)
+                wxGetApp().on_stealth_mode_enter();
+            else
+                wxGetApp().refresh_account_ui();
+            return new_val;
+        });
     auto item_enable_plugin = create_item_checkbox(_L("Enable network plugin"), page, _L("Enable network plugin"), 50, "installed_networking");
-    auto item_legacy_network_plugin = create_item_checkbox(_L("Use legacy network plugin (Takes effect after restarting Orca)"), page, _L("Disable to use latest network plugin that supports new BambuLab firmwares."), 50, "legacy_networking");
-    */
-    app_config->set_bool("stealth_mode", true);
-    app_config->set_bool("installed_networking", false);
-    app_config->save();
-
+    auto item_legacy_network_plugin = create_item_checkbox(_L("Use legacy network plugin (Takes effect after restarting Orca Unificado)"), page, _L("Disable to use latest network plugin that supports new BambuLab firmwares."), 50, "legacy_networking");
 
     //auto item_check_stable_version_only = create_item_checkbox(_L("Check for stable updates only"), page, _L("Check for stable updates only"), 50, "check_stable_update_only");
 
@@ -1378,15 +1379,9 @@ wxWindow* PreferencesDialog::create_general_page()
     sizer_page->Add(item_system_sync, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_remember_printer_config, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_save_presets, 0, wxTOP, FromDIP(3));
-    //sizer_page->Add(title_network, 0, wxTOP | wxEXPAND, FromDIP(20));
-    //sizer_page->Add(item_check_stable_version_only, 0, wxTOP, FromDIP(3));
-
-    // SM Beta: temporarily open the item_stealth_mode and close the network plugin
-
-    /*sizer_page->Add(item_stealth_mode, 0, wxTOP, FromDIP(3));
+    sizer_page->Add(item_stealth_mode, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_enable_plugin, 0, wxTOP, FromDIP(3));
     sizer_page->Add(item_legacy_network_plugin, 0, wxTOP, FromDIP(3));
-    */
 #ifdef _WIN32
     sizer_page->Add(title_associate_file, 0, wxTOP| wxEXPAND, FromDIP(20));
     sizer_page->Add(item_associate_3mf, 0, wxTOP, FromDIP(3));

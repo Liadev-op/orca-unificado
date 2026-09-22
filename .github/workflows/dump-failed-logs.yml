@@ -1,0 +1,59 @@
+name: Dump failed Windows logs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m1-orca-cloud-a90c
+    paths:
+      - ".github/workflows/dump-failed-logs.yml"
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  dump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch failed run logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run view 35634464332 --log-failed > failed.log
+          wc -c failed.log
+          echo '===== MATCHES ====='
+          grep -nE 'error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|FAILED|msgfmt|gettext|No space|OrcaCloud|cannot open|unresolved external|error MSB|Build FAILED|exit code' failed.log | tail -n 250 || true
+          echo '===== TAIL ====='
+          tail -n 150 failed.log
+
+      - name: Upload failed log
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-windows-log
+          path: failed.log
+          retention-days: 7
+
+      - name: Comment snippet on PR 2
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess, re
+          text = open('failed.log', errors='replace').read()
+          keys = re.compile(r'error C\d+|error LNK\d+|fatal error|CMake Error|No space|unresolved external|error MSB|Build FAILED|OrcaCloud', re.I)
+          lines = text.splitlines()
+          hits = [ln for ln in lines if keys.search(ln)]
+          tail = lines[-80:]
+          body = ['## Windows run 35634464332 — log dump', '', f'hits={len(hits)} bytes={len(text)}', '', '```']
+          body.extend(hits[-80:] or tail)
+          body.append('```')
+          msg = '\n'.join(body)[:60000]
+          open('comment.md','w').write(msg)
+          PY
+          gh pr comment 2 --body-file comment.md

@@ -2659,6 +2659,39 @@ void MainFrame::init_menubar_as_editor()
         append_submenu(fileMenu, export_menu, wxID_ANY, _L("Export"), "");
 
         fileMenu->AppendSeparator();
+        m_menu_item_orca_cloud = append_menu_item(fileMenu, wxID_ANY, _L("Orca Cloud account (presets)..."),
+            _L("Orca Cloud (cloud.orcaslicer.com) syncs printer, filament and process presets between PCs. Not the Snapmaker account used to bind the U1."),
+            [this](wxCommandEvent&) { wxGetApp().request_orca_cloud_login(); }, "", nullptr,
+            []() { return true; }, this);
+        m_menu_item_snapmaker_account = append_menu_item(fileMenu, wxID_ANY, _L("Snapmaker account (U1 bind)..."),
+            _L("Snapmaker (id.snapmaker.com) binds and controls the U1 on Device. It does not sync Orca Cloud presets."),
+            [this](wxCommandEvent&) { wxGetApp().request_snapmaker_account_from_ui(); }, "", nullptr,
+            []() { return true; }, this);
+        append_menu_item(fileMenu, wxID_ANY, _L("Sync Presets"),
+            _L("Pull and apply the latest presets from Orca Cloud. Requires the Orca Cloud account, not Snapmaker."),
+            [this](wxCommandEvent&) {
+                if (wxGetApp().app_config->get_stealth_mode()) {
+                    MessageDialog info_dlg(this,
+                        _L("Stealth mode is on. Orca Cloud will not open. Disable Stealth mode in Preferences."),
+                        _L("Orca Cloud"), wxOK | wxICON_INFORMATION);
+                    info_dlg.ShowModal();
+                    return;
+                }
+                if (!wxGetApp().is_orca_cloud_login()) {
+                    MessageDialog info_dlg(this,
+                        _L("You must be logged in to Orca Cloud to sync presets. The Snapmaker account used to bind the U1 will not fetch them."),
+                        _L("Sync Presets"), wxOK | wxICON_INFORMATION);
+                    info_dlg.ShowModal();
+                    return;
+                }
+                wxGetApp().restart_sync_user_preset();
+            }, "", nullptr,
+            []() {
+                return wxGetApp().is_orca_cloud_login() && !wxGetApp().app_config->get_stealth_mode();
+            }, this);
+        update_account_menu_labels();
+
+        fileMenu->AppendSeparator();
 
 #ifndef __APPLE__
         append_menu_item(fileMenu, wxID_EXIT, _L("Quit"), wxString::Format(_L("Quit")),
@@ -3018,6 +3051,41 @@ void MainFrame::init_menubar_as_editor()
             plater()->get_current_canvas3D()->force_set_focus();
         },
         "", nullptr, []() { return true; }, this);
+
+    m_menu_item_orca_cloud_top = append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Orca Cloud account (presets)..."),
+        _L("Orca Cloud (cloud.orcaslicer.com) syncs printer, filament and process presets between PCs. Not the Snapmaker account used to bind the U1."),
+        [this](wxCommandEvent&) { wxGetApp().request_orca_cloud_login(); }, "", nullptr,
+        []() { return true; }, this);
+    m_menu_item_snapmaker_account_top = append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Snapmaker account (U1 bind)..."),
+        _L("Snapmaker (id.snapmaker.com) binds and controls the U1 on Device. It does not sync Orca Cloud presets."),
+        [this](wxCommandEvent&) { wxGetApp().request_snapmaker_account_from_ui(); }, "", nullptr,
+        []() { return true; }, this);
+    append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Sync Presets"),
+        _L("Pull and apply the latest presets from Orca Cloud. Requires the Orca Cloud account, not Snapmaker."),
+        [this](wxCommandEvent&) {
+            if (wxGetApp().app_config->get_stealth_mode()) {
+                MessageDialog info_dlg(this,
+                    _L("Stealth mode is on. Orca Cloud will not open. Disable Stealth mode in Preferences."),
+                    _L("Orca Cloud"), wxOK | wxICON_INFORMATION);
+                info_dlg.ShowModal();
+                return;
+            }
+            if (!wxGetApp().is_orca_cloud_login()) {
+                MessageDialog info_dlg(this,
+                    _L("You must be logged in to Orca Cloud to sync presets. The Snapmaker account used to bind the U1 will not fetch them."),
+                    _L("Sync Presets"), wxOK | wxICON_INFORMATION);
+                info_dlg.ShowModal();
+                return;
+            }
+            wxGetApp().restart_sync_user_preset();
+        }, "", nullptr,
+        []() {
+            return wxGetApp().is_orca_cloud_login() && !wxGetApp().app_config->get_stealth_mode();
+        }, this);
+    update_account_menu_labels();
 
     m_topbar->AddDropDownSubMenu(helpMenu, _L("Help"));
 
@@ -3388,6 +3456,8 @@ void MainFrame::update_menubar()
         return;
 
     const bool is_fff = plater()->printer_technology() == ptFFF;
+    (void) is_fff;
+    update_account_menu_labels();
 }
 
 void MainFrame::reslice_now()
@@ -4078,6 +4148,54 @@ void MainFrame::refresh_plugin_tips()
 {
     if (m_webview != nullptr)
         m_webview->ShowNetpluginTip();
+}
+
+void MainFrame::update_account_menu_labels()
+{
+    auto set_item = [](wxMenuItem *item, const wxString &label, const wxString &help) {
+        if (!item)
+            return;
+        item->SetItemLabel(label);
+        item->SetHelp(help);
+    };
+
+    const bool stealth = wxGetApp().app_config && wxGetApp().app_config->get_stealth_mode();
+    const bool orca_on = wxGetApp().is_orca_cloud_login();
+    wxString   orca_name;
+    if (orca_on && wxGetApp().getOrcaCloud()) {
+        orca_name = wxString::FromUTF8(wxGetApp().getOrcaCloud()->get_user_name());
+        if (orca_name.empty())
+            orca_name = wxString::FromUTF8(wxGetApp().getOrcaCloud()->get_user_id());
+    }
+
+    wxString orca_label;
+    wxString orca_help = _L("Orca Cloud (cloud.orcaslicer.com) syncs printer, filament and process presets between PCs. Not the Snapmaker account used to bind the U1.");
+    if (stealth)
+        orca_label = _L("Orca Cloud (stealth on — login closed)...");
+    else if (orca_on && !orca_name.empty())
+        orca_label = wxString::Format(_L("Orca Cloud: %s (log out)..."), orca_name);
+    else if (orca_on)
+        orca_label = _L("Orca Cloud: signed in (log out)...");
+    else
+        orca_label = _L("Orca Cloud account (presets)...");
+
+    const bool sm_on = wxGetApp().sm_get_userinfo() && wxGetApp().sm_get_userinfo()->is_user_login();
+    wxString   sm_name;
+    if (sm_on)
+        sm_name = wxString::FromUTF8(wxGetApp().sm_get_userinfo()->get_user_name());
+    wxString sm_label;
+    wxString sm_help = _L("Snapmaker (id.snapmaker.com) binds and controls the U1 on Device. It does not sync Orca Cloud presets.");
+    if (sm_on && !sm_name.empty())
+        sm_label = wxString::Format(_L("Snapmaker: %s (log out)..."), sm_name);
+    else if (sm_on)
+        sm_label = _L("Snapmaker: signed in (log out)...");
+    else
+        sm_label = _L("Snapmaker account (U1 bind)...");
+
+    set_item(m_menu_item_orca_cloud, orca_label, orca_help);
+    set_item(m_menu_item_orca_cloud_top, orca_label, orca_help);
+    set_item(m_menu_item_snapmaker_account, sm_label, sm_help);
+    set_item(m_menu_item_snapmaker_account_top, sm_label, sm_help);
 }
 
 void MainFrame::RunScript(wxString js)

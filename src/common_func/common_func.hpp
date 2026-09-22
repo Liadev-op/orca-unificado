@@ -3,8 +3,8 @@
 #include <iostream>
 
 
-#define SLIC3R_APP_NAME "Snapmaker Orca"
-#define SLIC3R_APP_KEY "Snapmaker_Orca"
+#define SLIC3R_APP_NAME "Orca Unificado"
+#define SLIC3R_APP_KEY "OrcaUnificado"
 #define SLIC3R_VERSION "01.10.01.50"
 #define Snapmaker_VERSION "2.4.0"
 #define MIN_FIRM_VER "2.0.0"

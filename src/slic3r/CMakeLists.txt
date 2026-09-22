@@ -336,6 +336,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/NotificationManager.hpp
     GUI/OAuthDialog.cpp
     GUI/OAuthDialog.hpp
+    GUI/OrcaCloudLoginDialog.cpp
+    GUI/OrcaCloudLoginDialog.hpp
     GUI/MixedFilamentDialog.cpp
     GUI/MixedFilamentDialog.hpp
     GUI/MixedFilamentBatchDialog.cpp
@@ -621,6 +623,10 @@ set(SLIC3R_GUI_SOURCES
     Utils/MKS.hpp
     Utils/NetworkAgent.cpp
     Utils/NetworkAgent.hpp
+    Utils/CloudProvider.hpp
+    Utils/ICloudServiceAgent.hpp
+    Utils/OrcaCloudServiceAgent.cpp
+    Utils/OrcaCloudServiceAgent.hpp
     Utils/SnapLogClient.cpp
     Utils/SnapLogClient.hpp
     Utils/Obico.cpp

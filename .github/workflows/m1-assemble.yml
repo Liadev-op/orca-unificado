@@ -1,0 +1,99 @@
+name: m1-assemble
+on:
+  push:
+    branches: [cursor/m1-orca-cloud-a90c]
+    paths:
+      - 'm1-parts/**'
+      - '.github/workflows/m1-assemble.yml'
+  workflow_dispatch:
+concurrency:
+  group: m1-assemble
+  cancel-in-progress: false
+jobs:
+  assemble:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble ready M1 part batches
+        run: |
+          python3 << 'PY'
+          import base64, hashlib, pathlib, subprocess, sys, zlib
+
+          BRANCH = 'cursor/m1-orca-cloud-a90c'
+          root = pathlib.Path('m1-parts')
+          if not root.exists():
+              print('no m1-parts; nothing to assemble')
+              sys.exit(0)
+
+          batches = sorted(p for p in root.iterdir() if p.is_dir())
+          assembled = 0
+          for batch in batches:
+              if not (batch / 'READY').exists():
+                  print('skip incomplete', batch)
+                  continue
+              msg_file = batch / 'message.txt'
+              msg = msg_file.read_text(encoding='utf-8').strip() if msg_file.exists() else f'M1: assemble {batch.name}'
+              wrote = []
+              pdirs = {p.parent for p in list(batch.rglob('*.z64')) + list(batch.rglob('*.part'))}
+              for pdir in sorted(pdirs):
+                  rel = pdir.relative_to(batch).as_posix()
+                  parts = sorted(pdir.glob('*.part'))
+                  z64s = sorted(pdir.glob('*.z64'))
+                  if parts:
+                      data = b''.join(p.read_bytes() for p in parts).replace(b'@@TAB@@', b'\t')
+                  elif z64s:
+                      zdata = b''.join(base64.b64decode(c.read_bytes()) for c in z64s)
+                      data = zlib.decompress(zdata)
+                  else:
+                      continue
+                  got = hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+                  expect = pdir / 'expect.sha'
+                  if expect.exists():
+                      want = expect.read_text(encoding='utf-8').strip()
+                      if got != want:
+                          print('SHA MISMATCH', rel, 'got', got, 'want', want)
+                          sys.exit(1)
+                  out = pathlib.Path(rel)
+                  out.parent.mkdir(parents=True, exist_ok=True)
+                  out.write_bytes(data)
+                  wrote.append(rel)
+                  print('wrote', rel, len(data), got)
+              if not wrote:
+                  print('READY but no .part/.z64 in', batch)
+                  continue
+              subprocess.check_call(['git', 'add', '--'] + wrote)
+              subprocess.check_call(['git', 'rm', '-r', '-f', str(batch)])
+              subprocess.check_call(['git', 'config', 'user.name', 'Liadev'])
+              subprocess.check_call(['git', 'config', 'user.email', '122531419+Liadev-op@users.noreply.github.com'])
+              st = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True)
+              if not st.stdout.strip():
+                  print('nothing to commit for', batch)
+                  continue
+              subprocess.check_call(['git', 'commit', '-m', msg])
+              assembled += 1
+
+          if not assembled:
+              print('no ready batches')
+              sys.exit(0)
+
+          # Race that failed run #6: another push landed during checkout, so
+          # `git push` of a commit based on a stale tip was non-fast-forward.
+          for attempt in range(1, 6):
+              subprocess.check_call(['git', 'fetch', 'origin', BRANCH])
+              rebase = subprocess.run(['git', 'rebase', f'origin/{BRANCH}'])
+              if rebase.returncode != 0:
+                  subprocess.call(['git', 'rebase', '--abort'])
+                  print('rebase failed attempt', attempt, file=sys.stderr)
+                  sys.exit(rebase.returncode)
+              push = subprocess.run(['git', 'push', 'origin', f'HEAD:{BRANCH}'])
+              if push.returncode == 0:
+                  print('pushed', assembled, 'batch commit(s) attempt', attempt)
+                  sys.exit(0)
+              print('push rejected, retry', attempt, file=sys.stderr)
+          sys.exit(1)
+          PY

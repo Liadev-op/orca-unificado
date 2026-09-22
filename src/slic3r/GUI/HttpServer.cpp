@@ -10,6 +10,8 @@
 #include "GUI_App.hpp"
 #include "slic3r/Utils/Http.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
+#include "slic3r/Utils/OrcaCloudServiceAgent.hpp"
+#include <nlohmann/json.hpp>
 #include  "sentry_wrapper/SentryWrapper.hpp"
 #include <boost/beast/core/detail/base64.hpp>
 #ifdef _WIN32
@@ -909,6 +911,47 @@ std::shared_ptr<HttpServer::Response> HttpServer::bbl_auth_handle_request(const 
     }
 }
 
+std::shared_ptr<HttpServer::Response> HttpServer::orca_auth_handle_request(const std::string& url)
+{
+    BOOST_LOG_TRIVIAL(info) << "orca_cloud_login: callback " << url;
+    auto orca = wxGetApp().getOrcaCloud();
+    if (!orca)
+        return std::make_shared<ResponseNotFound>();
+
+    const std::string auth_code = url_get_param(url, "code");
+    if (!auth_code.empty()) {
+        std::string state = url_get_param(url, "orca_state");
+        if (state.empty())
+            state = url_get_param(url, "state");
+
+        nlohmann::json payload;
+        payload["command"] = "user_login";
+        payload["data"]["code"] = auth_code;
+        payload["data"]["state"] = state;
+        orca->change_user(payload.dump());
+        const bool login_ok = orca->is_user_login();
+        if (login_ok) {
+            wxGetApp().CallAfter([] {
+                wxGetApp().on_orca_cloud_login();
+                wxGetApp().ShowOrcaCloudLogin(false);
+            });
+        }
+        const std::string title = login_ok ? "Authentication complete" : "Authentication failed";
+        const std::string message = login_ok
+            ? "You can return to Orca Unificado. This window will close automatically."
+            : "Something went wrong. Please return to Orca Unificado and try again.";
+        const std::string html =
+            "<html><head><meta charset=\"utf-8\">"
+            "<style>body{font-family:Arial,sans-serif;background:#f7f7f7;color:#222;margin:32px;}</style></head><body>"
+            "<h2>" + title + "</h2><p>" + message + "</p>"
+            "<script>setTimeout(function(){try{window.close();}catch(e){}},1500);</script>"
+            "</body></html>";
+        return std::make_shared<ResponseHtml>(html);
+    }
+
+    return std::make_shared<ResponseNotFound>();
+}
+
 std::shared_ptr<HttpServer::Response> HttpServer::web_server_handle_request(const std::string& url)
 {
     BOOST_LOG_TRIVIAL(info) << "Handling file request for URL: " << url;
@@ -1022,6 +1065,15 @@ void HttpServer::ResponseNotFound::write_response(std::stringstream& ssOut)
     ssOut << "Content-Length: " << content_length << "\r\n"; // 正确计算长度
     ssOut << "\r\n";                                         // 头和主体之间的空行（必须）
     ssOut << sHTML;                                          // 响应体（长度必须匹配）
+}
+
+void HttpServer::ResponseHtml::write_response(std::stringstream& ssOut)
+{
+    write_common_headers(ssOut, 200, "OK");
+    ssOut << "Content-Type: text/html; charset=utf-8\r\n";
+    ssOut << "Content-Length: " << html.size() << "\r\n";
+    ssOut << "\r\n";
+    ssOut << html;
 }
 
 void HttpServer::ResponseFile::write_response(std::stringstream& ssOut)
