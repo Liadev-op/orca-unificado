@@ -1,0 +1,154 @@
+name: Apply M2 MainFrame models tab
+
+# One-shot: MainFrame.cpp is 184KB, too large for GitHub MCP push_files.
+# Surgical patch matches local disk (sha256 e48be142c8da4b71e6be7e788c15e6d2e05f9f4a6456de8c6512281699fef242).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/apply-m2-mainframe.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m2-models-webview-59e1
+
+      - name: Patch MainFrame.cpp
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/slic3r/GUI/MainFrame.cpp")
+          t = p.read_text(encoding="utf-8")
+          if "void MainFrame::ensure_models_tab()" in t and '#include "WebModelsPanel.hpp"' in t:
+              print("already patched")
+              raise SystemExit(0)
+          if t.startswith("\n#include"):
+              t = t[1:]
+          needle = '#include "Widgets/WebView.hpp"\n'
+          if needle not in t:
+              raise SystemExit("WebView include not found")
+          if '#include "WebModelsPanel.hpp"' not in t:
+              t = t.replace(needle, '#include "Widgets/WebView.hpp"\n#include "WebModelsPanel.hpp"\n', 1)
+          cali_end = """    m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"), std::string("tab_calibration_active"), false);
+
+    if (m_plater) {"""
+          cali_new = """    m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"), std::string("tab_calibration_active"), false);
+
+    ensure_models_tab();
+
+    if (m_plater) {"""
+          if cali_end not in t:
+              raise SystemExit("init_tabpanel calibration block not found")
+          t = t.replace(cali_end, cali_new, 1)
+          fn = """void MainFrame::ensure_models_tab()
+{
+    if (!wxGetApp().is_editor())
+        return;
+    if (!m_models_panel) {
+        m_models_panel = new WebModelsPanel(m_tabpanel);
+        m_models_panel->SetBackgroundColour(*wxWHITE);
+    }
+    int idx = m_tabpanel->FindPage(m_models_panel);
+    if (idx != wxNOT_FOUND)
+        m_tabpanel->RemovePage(idx);
+    m_models_panel->Show(false);
+    m_tabpanel->AddPage(m_models_panel, _L("Models"), std::string("tab_auxiliary_active"),
+                        std::string("tab_auxiliary_active"), false);
+}
+
+"""
+          close_init = """        }
+    }
+}
+
+// SoftFever
+void MainFrame::show_device(bool bBBLPrinter) {"""
+          close_new = """        }
+    }
+}
+
+""" + fn + """// SoftFever
+void MainFrame::show_device(bool bBBLPrinter) {"""
+          if close_init not in t:
+              raise SystemExit("close init_tabpanel not found")
+          t = t.replace(close_init, close_new, 1)
+          a = """        m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"),
+                               std::string("tab_calibration_active"), false);
+
+#ifdef _MSW_DARK_MODE"""
+          a2 = """        m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"),
+                               std::string("tab_calibration_active"), false);
+
+        ensure_models_tab();
+
+#ifdef _MSW_DARK_MODE"""
+          if a not in t:
+              raise SystemExit("show_device bbl calibration not found")
+          t = t.replace(a, a2, 1)
+          b = """        m_tabpanel->InsertPage(tpMonitor, m_printer_view, _L("Device"), std::string("tab_monitor_active"),
+                               std::string("tab_monitor_active"));
+    }
+}"""
+          b2 = """        m_tabpanel->InsertPage(tpMonitor, m_printer_view, _L("Device"), std::string("tab_monitor_active"),
+                               std::string("tab_monitor_active"));
+        ensure_models_tab();
+    }
+}"""
+          if b not in t:
+              raise SystemExit("show_device else insert not found")
+          t = t.replace(b, b2, 1)
+          c = """    if(m_calibration)
+        m_calibration->msw_rescale();
+
+    // BBS"""
+          c2 = """    if(m_calibration)
+        m_calibration->msw_rescale();
+    if (m_models_panel)
+        m_models_panel->msw_rescale();
+
+    // BBS"""
+          if c not in t:
+              raise SystemExit("msw_rescale not found")
+          t = t.replace(c, c2, 1)
+          d = """        append_submenu(fileMenu, import_menu, wxID_ANY, _L("Import"), "");
+
+
+        wxMenu* export_menu = new wxMenu();"""
+          d2 = """        append_submenu(fileMenu, import_menu, wxID_ANY, _L("Import"), "");
+
+        append_menu_item(fileMenu, wxID_ANY, _L("Convert Bambu 3MF to U1") + dots,
+            _L("Rewrite a MakerWorld/Bambu project as a Snapmaker U1 3MF, keeping color painting. Runs locally; does not call bl2u1.nbn.cat."),
+            [this](wxCommandEvent &) {
+                if (m_models_panel)
+                    m_models_panel->convert_file_dialog();
+            },
+            "", nullptr, []() { return true; }, this);
+
+        wxMenu* export_menu = new wxMenu();"""
+          if d not in t:
+              raise SystemExit("import menu not found")
+          t = t.replace(d, d2, 1)
+          p.write_text(t, encoding="utf-8")
+          print("patched", len(t))
+          PY
+
+      - name: Commit MainFrame.cpp
+        run: |
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          git add src/slic3r/GUI/MainFrame.cpp
+          if git diff --cached --quiet; then
+            echo "no cpp change"
+          else
+            git commit -m "feat: wire Models tab in MainFrame, CMake, and m2-windows zip"
+            git push origin HEAD:cursor/m2-models-webview-59e1
+          fi
