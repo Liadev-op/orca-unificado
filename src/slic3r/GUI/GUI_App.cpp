@@ -4127,8 +4127,8 @@ void GUI_App::ShowOrcaCloudLogin(bool show)
     if (show) {
         if (app_config->get_stealth_mode()) {
             MessageDialog dlg(mainframe,
-                _L("Stealth mode is enabled. Disable it in Preferences to log in to Orca Cloud."),
-                _L("Orca Cloud"), wxOK | wxICON_INFORMATION);
+                _L("Stealth mode is enabled, so Orca Cloud will not open.\n\nDisable Stealth mode in Preferences (General) to log in to the Orca Cloud account and sync presets between PCs.\nThe Snapmaker account for binding the U1 is separate and is not affected."),
+                _L("Orca Cloud account"), wxOK | wxICON_INFORMATION);
             dlg.ShowModal();
             return;
         }
@@ -4150,8 +4150,8 @@ void GUI_App::request_orca_cloud_login()
 {
     if (is_orca_cloud_login()) {
         MessageDialog dlg(mainframe,
-            _L("Log out of Orca Cloud? Local presets stay on disk; the user/<UUID>/ folder will switch back to default."),
-            _L("Orca Cloud"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+            _L("Log out of the Orca Cloud account?\nPresets stay on disk; user/<UUID>/ will switch back to default.\nThis does not log out of the Snapmaker account used to bind the U1."),
+            _L("Orca Cloud account"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
         if (dlg.ShowModal() == wxID_YES)
             request_orca_cloud_logout();
         return;
@@ -4176,6 +4176,7 @@ void GUI_App::request_orca_cloud_logout()
     preset_bundle->load_user_presets(DEFAULT_USER_FOLDER_NAME, ForwardCompatibilitySubstitutionRule::Enable);
     if (mainframe)
         mainframe->update_side_preset_ui();
+    refresh_account_ui();
 }
 
 void GUI_App::on_orca_cloud_login()
@@ -4192,6 +4193,7 @@ void GUI_App::on_orca_cloud_login()
     }
     if (app_config->get("sync_user_preset") == "true")
         start_sync_user_preset();
+    refresh_account_ui();
 }
 
 void GUI_App::on_stealth_mode_enter()
@@ -4199,6 +4201,64 @@ void GUI_App::on_stealth_mode_enter()
     stop_sync_user_preset();
     BOOST_LOG_TRIVIAL(info) << "logout: on_stealth_mode_enter";
     request_orca_cloud_logout();
+    refresh_account_ui();
+}
+
+void GUI_App::refresh_account_ui()
+{
+    if (!mainframe || mainframe->is_shutting_down())
+        return;
+    mainframe->update_account_menu_labels();
+    push_accounts_status_to_homepage();
+}
+
+void GUI_App::push_accounts_status_to_homepage()
+{
+    if (!mainframe || !mainframe->m_webview)
+        return;
+
+    json param;
+    param["command"]     = "accounts_status";
+    param["sequence_id"] = "10002";
+
+    json orca;
+    const bool stealth = app_config && app_config->get_stealth_mode();
+    orca["stealth"]    = stealth;
+    orca["logged_in"]  = is_orca_cloud_login();
+    std::string orca_name;
+    if (is_orca_cloud_login() && m_orca_cloud) {
+        orca_name = m_orca_cloud->get_user_name();
+        if (orca_name.empty())
+            orca_name = m_orca_cloud->get_user_id();
+    }
+    orca["name"]   = orca_name;
+    param["orca"]  = orca;
+
+    json sm;
+    const bool sm_on = m_login_userinfo.is_user_login();
+    sm["logged_in"]  = sm_on;
+    sm["name"]       = sm_on ? m_login_userinfo.get_user_name() : std::string();
+    param["snapmaker"] = sm;
+
+    wxString strJS = wxString::Format("window.postMessage(%s)", param.dump());
+    run_script(strJS);
+}
+
+void GUI_App::request_snapmaker_account_from_ui()
+{
+    if (m_login_userinfo.is_user_login()) {
+        MessageDialog dlg(mainframe,
+            _L("Log out of the Snapmaker account?\nThis unbinds cloud session for the U1. It does not log out of Orca Cloud or drop synced presets."),
+            _L("Snapmaker account"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (dlg.ShowModal() == wxID_YES) {
+            sm_request_user_logout();
+            sm_get_login_info();
+            refresh_account_ui();
+        }
+        return;
+    }
+    sm_request_login(true);
+    refresh_account_ui();
 }
 
 void GUI_App::handle_orca_http_error(unsigned int status, std::string body)
@@ -4500,6 +4560,7 @@ void GUI_App::sm_get_login_info() {
         GUI::wxGetApp().run_script(strJS);
     }
     mainframe->m_webview->SetLoginPanelVisibility(true);
+    refresh_account_ui();
 }
 
 void GUI_App::sm_request_login(bool show_user_info)
@@ -4577,6 +4638,7 @@ void GUI_App::sm_request_user_logout()
     } catch (std::exception&) {
         ;
     }
+    refresh_account_ui();
 }
 
 void GUI_App::start_flutter_wcp_timeout_watch()
@@ -4855,16 +4917,29 @@ std::string GUI_App::handle_web_request(std::string cmd)
             else if (command_str.compare("get_login_info") == 0) {
                 CallAfter([this] {
                         get_login_info();
+                        refresh_account_ui();
                     });
+            }
+            else if (command_str.compare("homepage_orca_cloud") == 0) {
+                CallAfter([this] {
+                    this->request_orca_cloud_login();
+                });
+            }
+            else if (command_str.compare("homepage_snapmaker_account") == 0) {
+                CallAfter([this] {
+                    this->request_snapmaker_account_from_ui();
+                });
             }
             else if (command_str.compare("homepage_login_or_register") == 0) {
                 CallAfter([this] {
-                    this->request_login(true);
+                    // Home login is the Snapmaker account (U1 bind), not Orca Cloud.
+                    this->request_snapmaker_account_from_ui();
                 });
             }
             else if (command_str.compare("homepage_logout") == 0) {
                 CallAfter([this] {
-                    wxGetApp().request_user_logout();
+                    wxGetApp().sm_request_user_logout();
+                    wxGetApp().sm_get_login_info();
                 });
             }
             else if (command_str.compare("homepage_modeldepot") == 0) {
@@ -7956,7 +8031,10 @@ void GUI_App::SMUserInfo::notify() {
     }
 
     wxGetApp().user_login_notify(data);
-
+    wxGetApp().CallAfter([] {
+        if (wxGetApp().mainframe && !wxGetApp().mainframe->is_shutting_down())
+            wxGetApp().refresh_account_ui();
+    });
 }
 bool is_support_filament(int extruder_id)
 {
