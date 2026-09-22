@@ -97,7 +97,7 @@ body
 /*----User Manual------*/
 .UG_DESC
 {
-	color:#818183;
+   color:#818183;
 }
 
 /*---Staff PIck----*/
@@ -138,4 +138,63 @@ body
 {
 	background: rgba(54, 54, 60, 0.88);
     border: 1px solid rgba(129, 129, 131, 0.64);
+}
+
+.AccountsIntro
+{
+	color: #B3B3B5;
+}
+
+.AccountCard
+{
+	border-color: #3E3E45;
+	background: #2A2A30;
+}
+
+.AccountKicker
+{
+	color: #818183;
+}
+
+.AccountTitle
+{
+	color: #EFEFF0;
+}
+
+.AccountDesc
+{
+	color: #B3B3B5;
+}
+
+.AccountStatus
+{
+	color: #EFEFF0;
+}
+
+.AccountBtn
+{
+	border-color: #00AE42;
+	color: #7DFFB3;
+}
+
+.AccountBtn:hover
+{
+	background: #223C3C;
+}
+
+.AccountCard.acct-in .AccountStatus
+{
+	color: #7DFFB3;
+}
+
+.AccountCard.acct-stealth
+{
+	border-color: #C9A227;
+	background: #3A3418;
+}
+
+.StealthWarn
+{
+	color: #FFD56A;
+	background: #3A3418;
 }

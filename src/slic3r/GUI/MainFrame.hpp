@@ -106,6 +106,10 @@ class MainFrame : public DPIFrame
     wxMenuItem* m_menu_item_repeat { nullptr }; // doesn't used now
 #endif
     wxMenuItem* m_menu_item_reslice_now { nullptr };
+    wxMenuItem* m_menu_item_orca_cloud { nullptr };
+    wxMenuItem* m_menu_item_snapmaker_account { nullptr };
+    wxMenuItem* m_menu_item_orca_cloud_top { nullptr };
+    wxMenuItem* m_menu_item_snapmaker_account_top { nullptr };
     wxSizer*    m_main_sizer{ nullptr };
 
     size_t      m_last_selected_tab;
@@ -362,6 +366,7 @@ public:
     bool        is_printer_view() const;
     void        refresh_plugin_tips();
     void        RunScript(wxString js);
+    void        update_account_menu_labels();
 
     void        downloadOpenProject(const std::string& fileUrl, 
                                     const std::string& fileName, 

@@ -112,10 +112,27 @@ SMUserLogin::SMUserLogin(bool isLogout) : wxDialog((wxWindow *) (wxGetApp().main
     m_callback_timer->Start(500);
 
     // UI
-    SetTitle(isLogout ? _L("Log out") : _L("Login"));
+    SetTitle(isLogout ? _L("Log out of Snapmaker account") : _L("Snapmaker account (bind U1)"));
     // Set a more sensible size for web browsing
     wxSize pSize = FromDIP(wxSize(650, 840));
     SetSize(pSize);
+
+    auto* bar = new wxPanel(this, wxID_ANY);
+    bar->SetBackgroundColour(wxColour(232, 244, 255));
+    auto* banner = new wxStaticText(bar, wxID_ANY,
+        _L("Snapmaker account — id.snapmaker.com. Binds and controls the U1 on Device. This is not Orca Cloud and does not sync presets between PCs."),
+        wxDefaultPosition, wxDefaultSize, 0);
+    banner->Wrap(FromDIP(610));
+    banner->SetForegroundColour(wxColour(20, 40, 70));
+    auto* bar_sizer = new wxBoxSizer(wxVERTICAL);
+    bar_sizer->Add(banner, 0, wxALL | wxEXPAND, FromDIP(8));
+    bar->SetSizer(bar_sizer);
+
+    auto* sizer = new wxBoxSizer(wxVERTICAL);
+    sizer->Add(bar, 0, wxEXPAND);
+    if (m_browser)
+        sizer->Add(m_browser, 1, wxEXPAND);
+    SetSizer(sizer);
 
     int     screenheight = wxSystemSettings::GetMetric(wxSYS_SCREEN_Y, NULL);
     int     screenwidth  = wxSystemSettings::GetMetric(wxSYS_SCREEN_X, NULL);
@@ -595,4 +612,3 @@ void SMAskUserLoginDialog::SetKeepAliveCallback(std::function<void()> fn)
 }
 
 }} // namespace Slic3r::GUI
-

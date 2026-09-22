@@ -23,7 +23,7 @@
 	<div id="LoginArea">
 	<div id="Login1">
 		<div id="Icon1"><img id="BBLIcon" src="../image/logo.png" /></div> <!-- ORCA use square icon for better consistency on UI -->
-		<div id="LoginBtn" class="TextS1" style="font-weight: 700;" onClick="OnLoginOrRegister()"><span class="trans" tid="t26">login</span>/<span class="trans" tid="t27">register</span></div>
+		<div id="LoginBtn" class="TextS1" style="font-weight: 700;" onClick="OnLoginOrRegister()"><span class="trans" tid="orca9">Snapmaker account</span></div>
 	</div>
 		
 	<div id="Login2">
@@ -51,7 +51,27 @@
 
 <div id="RightBoard">
 <div id="ContentBoard" class="ZScrol" board="recent">
-    <div style="height: 14px;"></div>	
+    <div style="height: 14px;"></div>
+	<div id="AccountsStrip">
+		<div class="AccountsIntro trans" tid="orca16">These are two different logins. Signing into Snapmaker will not fetch Orca Cloud presets.</div>
+		<div class="AccountsRow">
+			<div class="AccountCard" id="OrcaCloudCard">
+				<div class="AccountKicker trans" tid="orca6">Account 1 of 2</div>
+				<div class="AccountTitle trans" tid="orca7">Orca Cloud account</div>
+				<div class="AccountDesc trans" tid="orca8">Presets between PCs (cloud.orcaslicer.com). Not Snapmaker.</div>
+				<div class="AccountStatus" id="OrcaCloudStatus"></div>
+				<div class="AccountBtn trans" id="OrcaCloudBtn" tid="orca11" onClick="OnOrcaCloudAccount()">Log in</div>
+			</div>
+			<div class="AccountCard" id="SnapmakerCard">
+				<div class="AccountKicker trans" tid="orca6b">Account 2 of 2</div>
+				<div class="AccountTitle trans" tid="orca9">Snapmaker account</div>
+				<div class="AccountDesc trans" tid="orca10">Bind U1 on Device. Does not sync Orca Cloud presets.</div>
+				<div class="AccountStatus" id="SnapmakerStatus"></div>
+				<div class="AccountBtn trans" id="SnapmakerBtn" tid="orca11" onClick="OnSnapmakerAccount()">Log in</div>
+			</div>
+		</div>
+		<div id="StealthWarn" class="StealthWarn trans" tid="orca15" style="display:none;">Stealth mode is on — Orca Cloud will not open. Disable it in Preferences.</div>
+	</div>
 	<div id="MenuArea">
 <!--		<div class="MenuItem" onClick="OnClickModelDepot()">
 			<div class="MenuIcon"><img src="img/i6.png"></div>

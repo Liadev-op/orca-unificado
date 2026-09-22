@@ -94,6 +94,8 @@ function HandleStudio( pVal )
     SetLoginInfo(pVal["data"]["avatar"], pVal["data"]["name"]);
   } else if (strCmd == "studio_useroffline") {
     SetUserOffline();
+  } else if (strCmd == "accounts_status") {
+    ApplyAccountsStatus(pVal);
   } else if (strCmd == "studio_set_mallurl") {
     SetMallUrl(pVal["data"]["url"]);
   } else if (strCmd == "studio_clickmenu") {
@@ -264,6 +266,79 @@ function OnLoginOrRegister()
 	tSend['command']="homepage_login_or_register";
 	
 	SendWXMessage( JSON.stringify(tSend) );	
+}
+
+function OnOrcaCloudAccount()
+{
+	var tSend={};
+	tSend['sequence_id']=Math.round(new Date() / 1000);
+	tSend['command']="homepage_orca_cloud";
+	SendWXMessage( JSON.stringify(tSend) );
+}
+
+function OnSnapmakerAccount()
+{
+	var tSend={};
+	tSend['sequence_id']=Math.round(new Date() / 1000);
+	tSend['command']="homepage_snapmaker_account";
+	SendWXMessage( JSON.stringify(tSend) );
+}
+
+function ApplyAccountsStatus(pVal)
+{
+	let orca = pVal['orca'] || {};
+	let sm = pVal['snapmaker'] || {};
+	let stealth = !!orca['stealth'];
+	let orcaIn = !!orca['logged_in'];
+	let smIn = !!sm['logged_in'];
+
+	let orcaCard = document.getElementById('OrcaCloudCard');
+	let smCard = document.getElementById('SnapmakerCard');
+	let orcaStatus = document.getElementById('OrcaCloudStatus');
+	let smStatus = document.getElementById('SnapmakerStatus');
+	let orcaBtn = document.getElementById('OrcaCloudBtn');
+	let smBtn = document.getElementById('SnapmakerBtn');
+	let warn = document.getElementById('StealthWarn');
+	if (!orcaCard || !smCard) return;
+
+	orcaCard.classList.toggle('acct-stealth', stealth);
+	orcaCard.classList.toggle('acct-in', orcaIn && !stealth);
+	smCard.classList.toggle('acct-in', smIn);
+
+	if (stealth) {
+		orcaStatus.textContent = (LangTextCurrent('orca15') || 'Stealth mode is on — Orca Cloud will not open. Disable it in Preferences.');
+		if (orcaBtn) orcaBtn.textContent = LangTextCurrent('orca11') || 'Log in';
+		if (warn) warn.style.display = 'block';
+	} else if (orcaIn) {
+		let name = orca['name'] || '';
+		orcaStatus.textContent = (LangTextCurrent('orca14') || 'Signed in') + (name ? (': ' + name) : '');
+		if (orcaBtn) orcaBtn.textContent = LangTextCurrent('orca12') || 'Log out';
+		if (warn) warn.style.display = 'none';
+	} else {
+		orcaStatus.textContent = LangTextCurrent('orca13') || 'Not signed in';
+		if (orcaBtn) orcaBtn.textContent = LangTextCurrent('orca11') || 'Log in';
+		if (warn) warn.style.display = 'none';
+	}
+
+	if (smIn) {
+		let name = sm['name'] || '';
+		smStatus.textContent = (LangTextCurrent('orca14') || 'Signed in') + (name ? (': ' + name) : '');
+		if (smBtn) smBtn.textContent = LangTextCurrent('orca12') || 'Log out';
+	} else {
+		smStatus.textContent = LangTextCurrent('orca13') || 'Not signed in';
+		if (smBtn) smBtn.textContent = LangTextCurrent('orca11') || 'Log in';
+	}
+}
+
+function LangTextCurrent(tid)
+{
+	let strLang = localStorage.getItem(LANG_COOKIE_NAME);
+	if (!strLang || !LangText.hasOwnProperty(strLang)) strLang = 'en';
+	if (LangText[strLang] && LangText[strLang].hasOwnProperty(tid))
+		return LangText[strLang][tid];
+	if (LangText['en'] && LangText['en'].hasOwnProperty(tid))
+		return LangText['en'][tid];
+	return '';
 }
 
 function OnClickModelDepot()

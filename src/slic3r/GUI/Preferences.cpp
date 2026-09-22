@@ -1210,11 +1210,13 @@ wxWindow* PreferencesDialog::create_general_page()
     auto                  item_region= create_item_region_combobox(_L("Login Region"), page, _L("Login Region"), Regions);
 
     auto item_stealth_mode = create_item_checkbox(_L("Stealth mode"), page,
-        _L("This disables all Orca Cloud features, including profile syncing. Users who prefer to work entirely offline can enable this option.\nNote: When Stealth Mode is enabled, your user profiles will not be backed up to Orca Cloud. Snapmaker Device / U1 LAN is not this setting."),
+        _L("Stealth mode turns off Orca Cloud: File → Orca Cloud account will not open, and preset sync between PCs is disabled. Turn it off here if Cloud login does nothing.\nThis is not the Snapmaker account. Device / U1 bind still uses the Snapmaker login."),
         50, "stealth_mode",
         [](bool new_val, bool /*old_val*/) {
             if (new_val)
                 wxGetApp().on_stealth_mode_enter();
+            else
+                wxGetApp().refresh_account_ui();
             return new_val;
         });
     auto item_enable_plugin = create_item_checkbox(_L("Enable network plugin"), page, _L("Enable network plugin"), 50, "installed_networking");

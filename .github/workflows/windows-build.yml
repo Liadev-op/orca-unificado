@@ -5,6 +5,11 @@
 # Portable datadir: the zip ships `data_dir/` next to the exe.
 # GUI_App::init_app_config already uses that folder (native Orca/SnOrca).
 # Fallback: --datadir. Without the folder, Windows would use %APPDATA%\OrcaUnificado.
+#
+# Stacked feature branches (two-accounts UI, copy tweaks, …) must NOT be added
+# to on.push.branches. This workflow stays workflow_dispatch-only everywhere
+# except cursor/m1-orca-cloud-a90c, so a UI push cannot start or cancel the
+# Windows portable build already running on that branch.
 name: Windows build
 
 on:

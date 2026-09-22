@@ -12,8 +12,10 @@ Semilla: [Snapmaker/OrcaSlicer](https://github.com/Snapmaker/OrcaSlicer) tag **`
 
 Login y sync de presets de **Orca Cloud** (`cloud.orcaslicer.com`) encima de SnOrca, portados desde [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) tag **`v2.4.2`**.
 
-- Menú Archivo → **Orca Cloud…** (cuenta `cloud.orcaslicer.com`, no Snapmaker).
-- **Sync Presets** tira los presets de usuario al `user/<UUID>/` de esa sesión.
+- Menú Archivo → **Orca Cloud account (presets)…** (`cloud.orcaslicer.com`, presets entre PCs).
+- Menú Archivo → **Snapmaker account (U1 bind)…** (`id.snapmaker.com`, bind de la U1). Son **dos IdP distintos**; no se unifican.
+- Home muestra las dos cuentas y el estado de cada una. Si Stealth está on, Home y Archivo avisan que Cloud no abre.
+- **Sync Presets** tira los presets de usuario al `user/<UUID>/` de la sesión Orca Cloud (no de Snapmaker).
 - Stealth mode (Preferencias) bloquea login y sync Cloud, igual que vanilla.
 - `NetworkAgent` Bambu (`m_agent`) no se sustituye. Device Flutter y filamentsync `=` no se tocan.
 - Hub de plugins de `main` 2.5.0-dev **no** está portado.
