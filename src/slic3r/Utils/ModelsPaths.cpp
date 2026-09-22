@@ -5,6 +5,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
+#include <ctime>
+#include <boost/nowide/convert.hpp>
 #include <boost/nowide/fstream.hpp>
 
 #ifdef _WIN32
@@ -128,6 +130,43 @@ std::string sanitize_model_filename(const std::string &name)
     if (out.size() > 120)
         out.resize(120);
     return out;
+}
+
+std::string path_as_utf8(const boost::filesystem::path &p)
+{
+#ifdef _WIN32
+    return boost::nowide::narrow(p.wstring());
+#else
+    return p.string();
+#endif
+}
+
+boost::filesystem::path newest_model_file(const boost::filesystem::path &root)
+{
+    namespace fs = boost::filesystem;
+    boost::system::error_code ec;
+    if (!fs::exists(root, ec))
+        return {};
+    fs::path best;
+    std::time_t best_t = 0;
+    auto consider = [&](const fs::path &p) {
+        auto ext = p.extension().string();
+        boost::to_lower(ext);
+        if (ext != ".3mf" && ext != ".stl" && ext != ".zip" && ext != ".obj")
+            return;
+        std::time_t t = fs::last_write_time(p, ec);
+        if (ec)
+            return;
+        if (best.empty() || t >= best_t) {
+            best   = p;
+            best_t = t;
+        }
+    };
+    for (fs::recursive_directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
+        if (fs::is_regular_file(it->path(), ec))
+            consider(it->path());
+    }
+    return best;
 }
 
 } // namespace Slic3r
