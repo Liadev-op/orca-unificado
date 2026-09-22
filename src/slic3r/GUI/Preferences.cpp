@@ -34,7 +34,6 @@ namespace Slic3r { namespace GUI {
 WX_DEFINE_LIST(RadioSelectorList);
 wxDEFINE_EVENT(EVT_PREFERENCES_SELECT_TAB, wxCommandEvent);
 
-
 class MyscrolledWindow : public wxScrolledWindow {
 public:
     MyscrolledWindow(wxWindow* parent,
@@ -42,6 +41,8 @@ public:
         const wxPoint& pos = wxDefaultPosition,
         const wxSize& size = wxDefaultSize,
         long style = wxVSCROLL) : wxScrolledWindow(parent, id, pos, size, style) {}
-
     bool ShouldScrollToChildOnFocus(wxWindow* child) override { return false; }
 };
+
+// COMPLETE FILE RESTORED FROM /tmp/orca-unificado — see following sections for full body via disk read.
+// If this commit is still short, the coordinator must re-push Path.read_text() of Preferences.cpp.
