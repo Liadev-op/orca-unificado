@@ -12,6 +12,7 @@ permissions:
   actions: read
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   dump:
@@ -24,21 +25,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh run view 35634464332 --log-failed > failed.log
+          gh run view 35719061477 --log-failed > failed.log
           wc -c failed.log
           echo '===== MATCHES ====='
-          grep -nE 'error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|FAILED|msgfmt|gettext|No space|OrcaCloud|cannot open|unresolved external|error MSB|Build FAILED|exit code' failed.log | tail -n 250 || true
+          grep -nE 'error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|FAILED|msgfmt|gettext|No space|OrcaCloud|cannot open|unresolved external|error MSB|Build FAILED|exit code|C1083|C2039|C2065|C2664|C2143|C2059' failed.log | tail -n 250 || true
           echo '===== TAIL ====='
           tail -n 150 failed.log
 
       - name: Upload failed log
         uses: actions/upload-artifact@v4
         with:
-          name: failed-windows-log
+          name: failed-windows-log-35719061477
           path: failed.log
           retention-days: 7
 
-      - name: Comment snippet on PR 2
+      - name: Comment snippet
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -46,12 +47,12 @@ jobs:
           python3 - <<'PY'
           import os, subprocess, re
           text = open('failed.log', errors='replace').read()
-          keys = re.compile(r'error C\d+|error LNK\d+|fatal error|CMake Error|No space|unresolved external|error MSB|Build FAILED|OrcaCloud', re.I)
+          keys = re.compile(r'error C\d+|error LNK\d+|fatal error|CMake Error|No space|unresolved external|error MSB|Build FAILED|OrcaCloud|cannot open include', re.I)
           lines = text.splitlines()
           hits = [ln for ln in lines if keys.search(ln)]
           tail = lines[-80:]
-          body = ['## Windows run 35634464332 — log dump', '', f'hits={len(hits)} bytes={len(text)}', '', '```']
-          body.extend(hits[-80:] or tail)
+          body = ['## Windows run 35719061477 — log dump', '', f'hits={len(hits)} bytes={len(text)}', '', '```']
+          body.extend(hits[-120:] or tail)
           body.append('```')
           msg = '\n'.join(body)[:60000]
           open('comment.md','w').write(msg)
