@@ -287,6 +287,7 @@ AboutDialog::AboutDialog()
     // SM Beta
     text_list.push_back(_L("Note: The firmware version of SnapmakerU1 should be no less than") + " " + std::string(MIN_FIRM_VER));
     text_list.push_back(_L("Orca Unificado is an independent fork of Snapmaker Orca 2.4.0. Goal: Orca Cloud preset sync on top of Device U1. Not Orca Slicer and not Snapmaker Orca."));
+    text_list.push_back(_L("Two separate accounts: Orca Cloud (presets between PCs) and Snapmaker (bind U1). They do not share a login."));
     text_list.push_back(_L("OrcaSlicer is forked from Bambu Studio by Bambu Lab."));
     text_list.push_back(_L("Bambu Studio is forked from PrusaSlicer by Prusa Research, which is from Slic3r by Alessandro Ranellucci and the RepRap community. Orca Slicer incorporates a lot of features from SuperSlicer by @supermerill."));
     text_list.push_back(_L("Trademarks: Orca Slicer (SoftFever) and Snapmaker Orca (Snapmaker) remain with their owners. This fork does not publish the optional non-free Bambu networking plugin as its own."));
