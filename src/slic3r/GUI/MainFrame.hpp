@@ -51,6 +51,7 @@ class Plater;
 class MainFrame;
 class ParamsDialog;
 class SliceModePopup;
+class WebModelsPanel;
 
 enum QuickSlice
 {
@@ -223,6 +224,7 @@ public:
         tpCalibration   = 6,
         tpAuxiliary     = 7,
         toDebugTool     = 8,
+        tpModels        = 9,
     };
 
     //BBS: add slice&&print status update logic
@@ -270,6 +272,7 @@ public:
 	void        update_title_colour_after_set_title();
     void        show_option(bool show);
     void        init_tabpanel();
+    void        ensure_models_tab();
     void        create_preset_tabs();
     //BBS: GUI refactor
     void        add_created_tab(Tab* panel, const std::string& bmp_name = "");
@@ -394,6 +397,7 @@ public:
     //AuxiliaryPanel*       m_auxiliary{ nullptr };
     MultiMachinePage*     m_multi_machine{ nullptr };
     ProjectPanel*         m_project{ nullptr };
+    WebModelsPanel*       m_models_panel{ nullptr };
 
     CalibrationPanel*     m_calibration{ nullptr };
     WebViewPanel*         m_webview { nullptr };
