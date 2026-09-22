@@ -1,0 +1,106 @@
+name: Apply M2 MSVC C2001/C2084 fix
+
+# One-shot: patch converter raw-strings + sanitize_filename collision, then
+# workflow_dispatch windows-build.yml (tag m2-windows). Not on.push of windows-build.yml.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/apply-m2-msvc-fix.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-and-dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m2-models-webview-59e1
+
+      - name: Patch C2001 / C2084
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          conv = Path("src/slic3r/Utils/BambuToU1Converter.cpp")
+          t = conv.read_text(encoding="utf-8")
+          if 'R"re(' in t and "sanitize_model_filename" in Path("src/slic3r/Utils/ModelsPaths.hpp").read_text(encoding="utf-8"):
+              print("already patched")
+              raise SystemExit(0)
+          repls = [
+              (
+                  'static const std::regex attr_re(R"(([a-zA-Z_]+)\\s*=\\s*"([^"]*)")");',
+                  '// MSVC C2001: raw-string R"(...)" cannot contain )" — use a custom delimiter.\n    static const std::regex attr_re(R"re(([a-zA-Z_]+)\\s*=\\s*"([^"]*)")re");',
+              ),
+              (
+                  'static const std::regex re(R"(key="printer_model_id"\\s+value="[^"]*")");',
+                  'static const std::regex re(R"re(key="printer_model_id"\\s+value="[^"]*")re");',
+              ),
+              (
+                  'static const std::regex id_re(R"(\\bid\\s*=\\s*"([^"]*)")", std::regex::icase);',
+                  'static const std::regex id_re(R"re(\\bid\\s*=\\s*"([^"]*)")re", std::regex::icase);',
+              ),
+              (
+                  'static const std::regex re(R"(<metadata\\s+key="extruder"\\s+value="([^"]*)")", std::regex::icase);',
+                  'static const std::regex re(R"re(<metadata\\s+key="extruder"\\s+value="([^"]*)")re", std::regex::icase);',
+              ),
+              ("sanitize_filename(stem)", "sanitize_model_filename(stem)"),
+          ]
+          for a, b in repls:
+              if a not in t:
+                  raise SystemExit("missing converter snippet: " + a[:80])
+              t = t.replace(a, b, 1)
+          conv.write_text(t, encoding="utf-8")
+
+          hpp = Path("src/slic3r/Utils/ModelsPaths.hpp")
+          ht = hpp.read_text(encoding="utf-8")
+          old = "std::string sanitize_filename(const std::string &name);"
+          new = "// Distinct from Slic3r::sanitize_filename in libslic3r/Utils.hpp (inline).\nstd::string sanitize_model_filename(const std::string &name);"
+          if old not in ht:
+              raise SystemExit("missing ModelsPaths.hpp decl")
+          hpp.write_text(ht.replace(old, new, 1), encoding="utf-8")
+
+          cpp = Path("src/slic3r/Utils/ModelsPaths.cpp")
+          ct = cpp.read_text(encoding="utf-8")
+          old = "std::string sanitize_filename(const std::string &name)"
+          new = "std::string sanitize_model_filename(const std::string &name)"
+          if old not in ct:
+              raise SystemExit("missing ModelsPaths.cpp def")
+          cpp.write_text(ct.replace(old, new, 1), encoding="utf-8")
+
+          for rel in ("src/slic3r/Utils/ModelProvider.cpp", "src/slic3r/GUI/WebModelsPanel.cpp"):
+              p = Path(rel)
+              txt = p.read_text(encoding="utf-8")
+              nxt = txt.replace("sanitize_filename(", "sanitize_model_filename(")
+              if nxt == txt:
+                  raise SystemExit("no sanitize_filename in " + rel)
+              p.write_text(nxt, encoding="utf-8")
+          print("patched")
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          git add src/slic3r/Utils/BambuToU1Converter.cpp src/slic3r/Utils/ModelsPaths.hpp src/slic3r/Utils/ModelsPaths.cpp src/slic3r/Utils/ModelProvider.cpp src/slic3r/GUI/WebModelsPanel.cpp
+          if git diff --cached --quiet; then
+            echo no cpp change
+          else
+            git commit -m "fix: MSVC C2001 raw-string quotes and C2084 sanitize_filename"
+            git push origin HEAD:cursor/m2-models-webview-59e1
+          fi
+
+      - name: Dispatch Windows portable build (m2-windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-build.yml --ref cursor/m2-models-webview-59e1
+          sleep 10
+          gh run list --workflow=windows-build.yml --branch cursor/m2-models-webview-59e1 --limit 5
