@@ -1,0 +1,40 @@
+name: Restore two-accounts cpp
+on:
+  push:
+    branches:
+      - cursor/two-accounts-ui-0971
+    paths:
+      - ".github/workflows/restore-two-accounts-cpp.yml"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/two-accounts-ui-0971
+      - name: Apply patches, verify blobs, commit complete sources
+        env:
+          EXPECT_MF: 005099a7536212c7e3c54d74511ca03bff3f2380
+          EXPECT_GA: fbe76e1562bf67d6b5e528a8f94a11dfcca13463
+        run: |
+          set -euo pipefail
+          git apply .github/patches/two-accounts-ui/MainFrame.cpp.patch
+          git apply .github/patches/two-accounts-ui/GUI_App.cpp.patch
+          python3 -c 'import hashlib,os,pathlib
+def blob(p):
+    data=pathlib.Path(p).read_bytes()
+    return hashlib.sha1(b"blob %d\0"%len(data)+data).hexdigest(), len(data)
+mf,lm=blob("src/slic3r/GUI/MainFrame.cpp")
+ga,lg=blob("src/slic3r/GUI/GUI_App.cpp")
+print("MainFrame",lm,mf)
+print("GUI_App",lg,ga)
+assert mf==os.environ["EXPECT_MF"], mf
+assert ga==os.environ["EXPECT_GA"], ga'
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          git add src/slic3r/GUI/MainFrame.cpp src/slic3r/GUI/GUI_App.cpp
+          git rm -f .github/patches/two-accounts-ui/MainFrame.cpp.patch .github/patches/two-accounts-ui/GUI_App.cpp.patch .github/workflows/restore-two-accounts-cpp.yml
+          git commit -m "ui: distinguish Orca Cloud and Snapmaker accounts"
+          git push origin HEAD:cursor/two-accounts-ui-0971
