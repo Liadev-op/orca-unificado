@@ -1,15 +1,12 @@
-# Windows portable of Orca Unificado (Snapmaker Orca 2.4.0 + M1 Orca Cloud).
+# Windows portable of Orca Unificado (Snapmaker Orca 2.4.0 + Orca Cloud + Models).
 # Same pipeline as Snapmaker v2.4.0: VS2022, cached deps, build_release_vs2022.bat.
 # First run builds deps (~1-2 h) then the slicer. Later runs reuse Actions cache.
 #
 # Portable datadir: the zip ships `data_dir/` next to the exe.
-# GUI_App::init_app_config already uses that folder (native Orca/SnOrca).
-# Fallback: --datadir. Without the folder, Windows would use %APPDATA%\OrcaUnificado.
+# Models downloads: `models/` next to the exe (not inside data_dir).
 #
-# Stacked feature branches (two-accounts UI, copy tweaks, …) must NOT be added
-# to on.push.branches. This workflow stays workflow_dispatch-only everywhere
-# except cursor/m1-orca-cloud-a90c, so a UI push cannot start or cancel the
-# Windows portable build already running on that branch.
+# Do NOT add stacked feature branches to on.push.branches. This workflow is
+# workflow_dispatch-only except the original M1 pin cursor/m1-orca-cloud-a90c.
 name: Windows build
 
 on:
@@ -186,15 +183,49 @@ jobs:
             'Fallback: snapmaker-orca.exe --datadir D:\\ruta\\absoluta'
           ) -join $nl
           [System.IO.File]::WriteAllText((Join-Path $dataDir "LEEME.txt"), $leemeData + $nl, $utf8)
+          $webviewMw = Join-Path $dataDir "webview\\makerworld"
+          $webviewPr = Join-Path $dataDir "webview\\printables"
+          New-Item -ItemType Directory -Force -Path $webviewMw | Out-Null
+          New-Item -ItemType Directory -Force -Path $webviewPr | Out-Null
+          $models = Join-Path $dest "models"
+          New-Item -ItemType Directory -Force -Path (Join-Path $models "makerworld") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $models "printables") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $models "converted") | Out-Null
+          $leemeModels = @(
+            'Orca Unificado - biblioteca portable (models)',
+            '================================================',
+            '',
+            'Descargas de la pestaña Models (MakerWorld / Printables).',
+            'No es configuracion: vive junto al exe, no dentro de data_dir.',
+            '',
+            '  models/makerworld/<id>/     3MF/STL bajados de MakerWorld',
+            '  models/printables/<id>/     3MF/STL bajados de Printables',
+            '  models/converted/<stem>-U1.3mf   salida del conversor local (bl2u1, GPL-3)',
+            '',
+            'Cookies de login: data_dir/webview/<provider>/ (WebView2).',
+            'Borrar data_dir no borra esta carpeta. Copiala aparte si reinstalas el zip.',
+            '',
+            'Conversor: port C++ de josuanbn/bl2u1 (GPL-3.0). No llama a nbn.cat.'
+          ) -join $nl
+          [System.IO.File]::WriteAllText((Join-Path $models "LEEME.txt"), $leemeModels + $nl, $utf8)
+          $leemeConv = @(
+            '3MF convertidos a Snapmaker U1 (local).',
+            'Logica: josuanbn/bl2u1, GPL-3.0, https://github.com/josuanbn/bl2u1',
+            'Abrir como proyecto en Prepare (la maquina ya es U1).'
+          ) -join $nl
+          [System.IO.File]::WriteAllText((Join-Path $models "converted\\README.txt"), $leemeConv + $nl, $utf8)
           $leemeRoot = @(
             'Orca Unificado (portable)',
             '=========================',
             '',
             '1. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).',
             '2. La configuracion se crea en la carpeta data_dir, junto a este archivo.',
-            '3. Copia esta carpeta entera a otro PC: perfiles y cuenta viajan con el zip.',
+            '3. La pestaña Models guarda descargas en models/ (MakerWorld / Printables).',
+            '4. Copia esta carpeta entera a otro PC: perfiles y cuenta viajan con el zip.',
+            '   Copia models/ aparte si ya tenias descargas.',
             '',
-            'No pisa %APPDATA% de Snapmaker Orca ni de Orca Slicer.'
+            'No pisa %APPDATA% de Snapmaker Orca ni de Orca Slicer.',
+            'La pestaña Project/Model de Snapmaker Space no se sustituye.'
           ) -join $nl
           [System.IO.File]::WriteAllText((Join-Path $dest "LEEME.txt"), $leemeRoot + $nl, $utf8)
           $zipName = "OrcaUnificado_Windows_$($env:ver)_portable.zip"
@@ -203,7 +234,7 @@ jobs:
           & "C:\\Program Files\\7-Zip\\7z.exe" a -tzip $zip $dest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item $zip | Format-List FullName, Length
-          & "C:\\Program Files\\7-Zip\\7z.exe" l $zip | Select-String -Pattern "data_dir|LEEME|snapmaker-orca.exe"
+          & "C:\\Program Files\\7-Zip\\7z.exe" l $zip | Select-String -Pattern "data_dir|models|LEEME|snapmaker-orca.exe"
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
@@ -216,26 +247,29 @@ jobs:
       - name: Publish GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: m1-windows
+          tag_name: m2-windows
           target_commitish: ${{ github.sha }}
-          name: Orca Unificado Windows (M1, portable data_dir)
+          name: Orca Unificado Windows (M2, Models + conversor U1)
           prerelease: true
           make_latest: false
           files: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
           body: |
-            Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado).
-            Self-contained: la config vive en `data_dir` junto al exe (mecanismo nativo Orca/SnOrca, PR SoftFever #6780).
-            No pisa %APPDATA%\Snapmaker_Orca ni %APPDATA%\OrcaSlicer ni %APPDATA%\OrcaUnificado.
+            Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado). **M2** — pestaña Models.
+            No pisa el zip validado de M1 (`m1-windows`).
 
-            1. Descarga el zip.
-            2. Extrae la carpeta OrcaUnificado.
-            3. Ejecuta snapmaker-orca.exe.
-            4. Tras el primer arranque verás `OrcaUnificado\data_dir\` (user, cache, log, OrcaUnificado.conf, etc.).
+            Self-contained: config en `data_dir` junto al exe. Descargas en `models/` (no es config).
+            Cookies MakerWorld/Printables: `data_dir/webview/<provider>/`.
 
-            Si usaste el zip anterior, copia el contenido de `%APPDATA%\OrcaUnificado` a `data_dir` para no repetir el wizard.
+            1. Extrae **al lado** del zip M1 (no encima) la primera vez.
+            2. Ejecuta snapmaker-orca.exe.
+            3. Pestaña **Models** (no sustituye Project/Space): MakerWorld a pantalla completa.
+            4. Download del sitio → `models/makerworld/...`. Convertir a U1 → `models/converted/*-U1.3mf`.
+            5. Abrir en Prepare: convertido = proyecto U1; sin convertir = importar geometría.
+
+            Conversor local: port C++ de josuanbn/bl2u1 (GPL-3.0). No llama a nbn.cat ni Python.
 
             Fallback: `snapmaker-orca.exe --datadir "D:\\ruta"`.
-            Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (el CPACK de SnOrca pisaría el instalador oficial Snapmaker).
+            Sin firma Authenticode. NSIS no va en este corte.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -251,6 +285,6 @@ jobs:
             "- deps cache: ${{ steps.cache-deps.outputs.cache-hit }}",
             "- deps ok: ${{ steps.deps-ok.outputs.ok }}",
             "- datadir: data_dir junto al exe (no APPDATA)",
-            "- Release: https://github.com/${{ github.repository }}/releases/tag/m1-windows"
+            "- Release: https://github.com/${{ github.repository }}/releases/tag/m2-windows"
           )
           $lines -join [Environment]::NewLine | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
