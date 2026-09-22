@@ -773,3 +773,115 @@ body
 	cursor: pointer!important;
 	pointer-events: auto!important;
 }
+
+#AccountsStrip
+{
+	margin: 0 18px 18px 18px;
+	max-width: 920px;
+}
+
+.AccountsIntro
+{
+	font-size: 13px;
+	line-height: 18px;
+	color: #555;
+	margin-bottom: 10px;
+}
+
+.AccountsRow
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+}
+
+.AccountCard
+{
+	flex: 1 1 280px;
+	min-width: 240px;
+	border: 1px solid #D7D7D7;
+	border-radius: 10px;
+	padding: 14px 16px 16px 16px;
+	background: #fff;
+	box-sizing: border-box;
+}
+
+.AccountKicker
+{
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #888;
+	margin-bottom: 4px;
+}
+
+.AccountTitle
+{
+	font-size: 16px;
+	font-weight: 700;
+	color: #222;
+	margin-bottom: 4px;
+}
+
+.AccountDesc
+{
+	font-size: 13px;
+	line-height: 18px;
+	color: #666;
+	margin-bottom: 10px;
+}
+
+.AccountStatus
+{
+	font-size: 13px;
+	line-height: 18px;
+	color: #333;
+	margin-bottom: 10px;
+	min-height: 18px;
+}
+
+.AccountBtn
+{
+	display: inline-block;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 600;
+	padding: 6px 12px;
+	border-radius: 6px;
+	border: 1px solid #00AE42;
+	color: #008C36;
+	user-select: none;
+}
+
+.AccountBtn:hover
+{
+	background: #E8F8EE;
+}
+
+.AccountCard.acct-in .AccountStatus
+{
+	color: #008C36;
+	font-weight: 600;
+}
+
+.AccountCard.acct-stealth
+{
+	border-color: #E0B000;
+	background: #FFFBEA;
+}
+
+.StealthWarn
+{
+	margin-top: 10px;
+	font-size: 13px;
+	line-height: 18px;
+	color: #8A5A00;
+	background: #FFF4CC;
+	border-radius: 8px;
+	padding: 8px 12px;
+}
+
+@media (max-width: 640px) {
+	#AccountsStrip { margin: 0 10px 14px 10px; }
+	.AccountCard { min-width: 100%; }
+}
