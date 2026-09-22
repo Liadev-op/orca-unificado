@@ -57,6 +57,7 @@
 #include <ctime>
 
 #include "GUI_App.hpp"
+#include "slic3r/Utils/OrcaCloudServiceAgent.hpp"
 #include "FilamentGroupDialog.hpp"
 #include "FlowTypeHelper.hpp"
 #include "SliceModePopup.hpp"
