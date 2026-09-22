@@ -1,0 +1,82 @@
+--- a/src/slic3r/GUI/MainFrame.cpp
++++ b/src/slic3r/GUI/MainFrame.cpp
+@@ -71,6 +71,7 @@
+ #include "NetworkTestDialog.hpp"
+ #include "ConfigWizard.hpp"
+ #include "Widgets/WebView.hpp"
++#include "WebModelsPanel.hpp"
+ #include "DailyTips.hpp"
+ 
+ #ifdef _WIN32
+@@ -1290,6 +1291,8 @@
+     m_calibration->SetBackgroundColour(*wxWHITE);
+     m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"), std::string("tab_calibration_active"), false);
+ 
++    ensure_models_tab();
++
+     if (m_plater) {
+         // load initial config
+         auto full_config = wxGetApp().preset_bundle->full_config();
+@@ -1304,6 +1307,22 @@
+     }
+ }
+ 
++void MainFrame::ensure_models_tab()
++{
++    if (!wxGetApp().is_editor())
++        return;
++    if (!m_models_panel) {
++        m_models_panel = new WebModelsPanel(m_tabpanel);
++        m_models_panel->SetBackgroundColour(*wxWHITE);
++    }
++    int idx = m_tabpanel->FindPage(m_models_panel);
++    if (idx != wxNOT_FOUND)
++        m_tabpanel->RemovePage(idx);
++    m_models_panel->Show(false);
++    m_tabpanel->AddPage(m_models_panel, _L("Models"), std::string("tab_auxiliary_active"),
++                        std::string("tab_auxiliary_active"), false);
++}
++
+ // SoftFever
+ void MainFrame::show_device(bool bBBLPrinter) {
+     auto idx = -1;
+@@ -1344,6 +1363,8 @@
+         m_tabpanel->AddPage(m_calibration, _L("Calibration"), std::string("tab_calibration_active"),
+                                std::string("tab_calibration_active"), false);
+ 
++        ensure_models_tab();
++
+ #ifdef _MSW_DARK_MODE
+         wxGetApp().UpdateDarkUIWin(this);
+ #endif // _MSW_DARK_MODE
+@@ -1375,6 +1396,7 @@
+         m_printer_view->Show(false);
+         m_tabpanel->InsertPage(tpMonitor, m_printer_view, _L("Device"), std::string("tab_monitor_active"),
+                                std::string("tab_monitor_active"));
++        ensure_models_tab();
+     }
+ }
+ 
+@@ -2288,6 +2310,8 @@
+         m_multi_machine->msw_rescale();
+     if(m_calibration)
+         m_calibration->msw_rescale();
++    if (m_models_panel)
++        m_models_panel->msw_rescale();
+ 
+     // BBS
+ #if 0
+@@ -2627,6 +2651,13 @@
+ 
+         append_submenu(fileMenu, import_menu, wxID_ANY, _L("Import"), "");
+ 
++        append_menu_item(fileMenu, wxID_ANY, _L("Convert Bambu 3MF to U1") + dots,
++            _L("Rewrite a MakerWorld/Bambu project as a Snapmaker U1 3MF, keeping color painting. Runs locally; does not call bl2u1.nbn.cat."),
++            [this](wxCommandEvent &) {
++                if (m_models_panel)
++                    m_models_panel->convert_file_dialog();
++            },
++            "", nullptr, []() { return true; }, this);
+ 
+         wxMenu* export_menu = new wxMenu();
+         // BBS export as STL
