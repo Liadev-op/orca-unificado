@@ -1,0 +1,59 @@
+name: Dump M2 slicer logs
+
+# One-shot: pull compiler errors from failed Windows build 35753781984.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/dump-m2-slicer-logs.yml"
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  dump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch failed run logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run view 35753781984 --log-failed > failed.log
+          wc -c failed.log
+          echo '===== MATCHES ====='
+          grep -nE 'error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|FAILED|cannot open|unresolved external|error MSB|Build FAILED|WebView|WebModels|BambuToU1|ModelsPaths|ModelProvider|C2027|C2039|C2065|C2664|C1083|C2440' failed.log | tail -n 300 || true
+          echo '===== TAIL ====='
+          tail -n 80 failed.log
+
+      - name: Upload failed log
+        uses: actions/upload-artifact@v4
+        with:
+          name: m2-failed-slicer-log
+          path: failed.log
+          retention-days: 7
+
+      - name: Comment snippet on PR 4
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import re
+          text = open('failed.log', errors='replace').read()
+          keys = re.compile(r'error C\d+|error LNK\d+|fatal error|CMake Error|unresolved external|error MSB|Build FAILED|C2027|C2039|C2065|C2664|C1083|C2440|WebView2Host|WebModelsPanel|BambuToU1', re.I)
+          lines = text.splitlines()
+          hits = [ln for ln in lines if keys.search(ln)]
+          tail = lines[-60:]
+          body = ['## Windows run 35753781984 — Build slicer log', '', f'hits={len(hits)} bytes={len(text)}', '', '```']
+          body.extend(hits[-100:] or tail)
+          body.append('```')
+          open('comment.md','w').write('\n'.join(body)[:60000])
+          PY
+          gh pr comment 4 --body-file comment.md
