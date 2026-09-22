@@ -1,0 +1,65 @@
+name: Fix MainFrame C2027
+
+# One-shot: complete OrcaCloudServiceAgent type in MainFrame.cpp (two-accounts UI).
+# MSVC C2027/C2039 on get_user_name/get_user_id — GUI_App.hpp only forward-declares the class.
+# Then workflow_dispatch windows-build.yml on main (deps cache, no NSIS, no Flutter).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/fix-mainframe-c2027.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-and-rebuild:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Insert OrcaCloudServiceAgent.hpp in MainFrame.cpp
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/slic3r/GUI/MainFrame.cpp")
+          t = p.read_text(encoding="utf-8")
+          inc = '#include "slic3r/Utils/OrcaCloudServiceAgent.hpp"'
+          if inc in t:
+              print("include already present")
+          else:
+              needle = '#include "GUI_App.hpp"\n'
+              if needle not in t:
+                  raise SystemExit("GUI_App.hpp include not found")
+              t = t.replace(needle, needle + inc + "\n", 1)
+              p.write_text(t, encoding="utf-8")
+              print("patched")
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          git add src/slic3r/GUI/MainFrame.cpp
+          if git diff --cached --quiet; then
+            echo "no cpp change"
+          else
+            git commit -m "fix: include OrcaCloudServiceAgent.hpp in MainFrame (MSVC C2027 incomplete type)"
+            git push origin HEAD:main
+          fi
+
+      - name: Dispatch Windows portable build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-build.yml --ref main
+          sleep 8
+          gh run list --workflow=windows-build.yml --limit 5
