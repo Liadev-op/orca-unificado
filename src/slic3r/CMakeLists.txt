@@ -469,10 +469,14 @@ set(SLIC3R_GUI_SOURCES
     GUI/WebDownPluginDlg.hpp
     GUI/WebGuideDialog.cpp
     GUI/WebGuideDialog.hpp
+    GUI/WebModelsPanel.cpp
+    GUI/WebModelsPanel.hpp
     GUI/WebUserLoginDialog.cpp
     GUI/WebUserLoginDialog.hpp
     GUI/WebViewDialog.cpp
     GUI/WebViewDialog.hpp
+    GUI/WebView2Host.cpp
+    GUI/WebView2Host.hpp
     GUI/Widgets/AMSControl.cpp
     GUI/Widgets/AMSControl.hpp
     GUI/Widgets/AMSItem.cpp
@@ -579,6 +583,8 @@ set(SLIC3R_GUI_SOURCES
     Utils/bambu_networking.hpp
     Utils/Bonjour.cpp
     Utils/Bonjour.hpp
+    Utils/BambuToU1Converter.cpp
+    Utils/BambuToU1Converter.hpp
     Utils/CpuMemory.cpp
     Utils/CpuMemory.hpp
     Utils/CalibUtils.cpp
@@ -621,6 +627,10 @@ set(SLIC3R_GUI_SOURCES
     Utils/minilzo_extension.hpp
     Utils/MKS.cpp
     Utils/MKS.hpp
+    Utils/ModelProvider.cpp
+    Utils/ModelProvider.hpp
+    Utils/ModelsPaths.cpp
+    Utils/ModelsPaths.hpp
     Utils/NetworkAgent.cpp
     Utils/NetworkAgent.hpp
     Utils/CloudProvider.hpp
@@ -732,7 +742,15 @@ target_include_directories(libslic3r_gui PRIVATE ${PAHO_MQTT_C_PATH}/src)
 
 if (WIN32)
     target_include_directories(libslic3r_gui SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../deps/WebView2/include)
-    target_link_libraries(libslic3r_gui Advapi32)
+    target_link_libraries(libslic3r_gui Advapi32 ole32)
+    if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "AMD64")
+        set(_wv2_arch x64)
+    elseif ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "ARM64")
+        set(_wv2_arch arm64)
+    else()
+        set(_wv2_arch x86)
+    endif()
+    target_link_libraries(libslic3r_gui "${CMAKE_CURRENT_SOURCE_DIR}/../../deps/WebView2/lib/win-${_wv2_arch}/WebView2Loader.dll.lib")
 endif()
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SLIC3R_GUI_SOURCES})
