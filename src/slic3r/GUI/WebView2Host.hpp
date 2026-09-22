@@ -32,8 +32,12 @@ public:
     wxString    CurrentUrl() const;
     bool        IsReady() const { return m_ready; }
 
-    // Next DownloadStarting is forced into this full path (UTF-8). Empty = derive from suggested name.
-    void        SetNextDownloadPath(const wxString &path_utf8) { m_next_download = path_utf8; }
+    // Next DownloadStarting is forced into this full path. Empty = derive from suggested name.
+    void        SetNextDownloadPath(const wxString &path) { m_next_download = path; }
+
+    // WebView2 profile default folder (models/<provider>/). Wide path on Windows.
+    void        SetDefaultDownloadFolder(const wxString &folder);
+    wxString    DefaultDownloadFolder() const { return m_default_dl_folder; }
 
     using SuggestFn = std::function<wxString(const wxString &uri, const wxString &suggested)>;
     void        SetDownloadPathSuggester(SuggestFn fn) { m_suggest = std::move(fn); }
@@ -49,6 +53,7 @@ private:
     wxString  m_pending_url;
     wxString  m_current_url;
     wxString  m_next_download;
+    wxString  m_default_dl_folder;
     SuggestFn m_suggest;
     bool      m_ready{false};
     bool      m_can_back{false};
@@ -56,6 +61,7 @@ private:
 
 #ifdef _WIN32
     void       StartWebView2();
+    void       ApplyDefaultDownloadFolder();
     struct Native;
     Native    *m_native{nullptr};
 #else
