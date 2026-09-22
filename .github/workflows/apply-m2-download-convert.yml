@@ -1,0 +1,81 @@
+name: Apply M2 download + converter no-throw
+
+# One-shot: apply the C++ patch, commit, then workflow_dispatch
+# windows-build.yml (tag m2-windows). Does not overwrite m1-windows.
+# This branch is NOT added to windows-build.yml on.push.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/apply-m2-download-convert.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-and-dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m2-models-webview-59e1
+
+      - name: Apply download + converter patch
+        run: |
+          if [ -f .github/patches/m2-download-convert.p0 ]; then
+            cat .github/patches/m2-download-convert.p0 \
+                .github/patches/m2-download-convert.p1 \
+                .github/patches/m2-download-convert.p2 > /tmp/m2-download-convert.patch
+            git apply --whitespace=nowarn /tmp/m2-download-convert.patch
+          elif [ -f .github/patches/m2-download-convert.patch ]; then
+            git apply --whitespace=nowarn .github/patches/m2-download-convert.patch
+          fi
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("src/slic3r/GUI/MainFrame.cpp")
+          t = p.read_text(encoding="utf-8")
+          old = """            [this](wxCommandEvent &) {
+                if (m_models_panel)
+                    m_models_panel->convert_file_dialog();
+            },"""
+          new = """            [this](wxCommandEvent &) {
+                try {
+                    if (m_models_panel)
+                        m_models_panel->convert_file_dialog();
+                } catch (...) {
+                    wxMessageBox(_L("Convert to U1 failed. The app stayed open."), _L("Orca Unificado"), wxOK | wxICON_ERROR);
+                }
+            },"""
+          if "Convert to U1 failed. The app stayed open." in t:
+              print("mainframe already patched")
+          elif old not in t:
+              raise SystemExit("mainframe snippet missing")
+          else:
+              p.write_text(t.replace(old, new, 1), encoding="utf-8")
+              print("patched mainframe")
+          PY
+          git add src/slic3r/Utils/ModelsPaths.hpp src/slic3r/Utils/ModelsPaths.cpp \
+                  src/slic3r/Utils/BambuToU1Converter.cpp \
+                  src/slic3r/GUI/WebView2Host.hpp src/slic3r/GUI/WebView2Host.cpp \
+                  src/slic3r/GUI/WebModelsPanel.cpp src/slic3r/GUI/MainFrame.cpp
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          if git diff --cached --quiet; then
+            echo already applied
+          else
+            git commit -m "fix: Models download path and U1 converter no-throw"
+            git push origin HEAD:cursor/m2-models-webview-59e1
+          fi
+
+      - name: Dispatch Windows portable build (m2-windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-build.yml --ref cursor/m2-models-webview-59e1
+          sleep 10
+          gh run list --workflow=windows-build.yml --branch cursor/m2-models-webview-59e1 --limit 5
