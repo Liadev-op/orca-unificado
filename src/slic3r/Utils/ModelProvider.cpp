@@ -34,7 +34,7 @@ std::string MakerWorldProvider::download_subfolder(const std::string &page_url, 
     if (id.empty())
         id = first_capture(download_url, re_models);
     if (id.empty())
-        id = sanitize_filename(boost::filesystem::path(download_url).stem().string());
+        id = sanitize_model_filename(boost::filesystem::path(download_url).stem().string());
     if (id.empty())
         id = "download";
     return id;
@@ -55,7 +55,7 @@ std::string PrintablesProvider::download_subfolder(const std::string &page_url, 
     if (id.empty())
         id = first_capture(download_url, re_model);
     if (id.empty())
-        id = sanitize_filename(boost::filesystem::path(download_url).stem().string());
+        id = sanitize_model_filename(boost::filesystem::path(download_url).stem().string());
     if (id.empty())
         id = "download";
     return id;

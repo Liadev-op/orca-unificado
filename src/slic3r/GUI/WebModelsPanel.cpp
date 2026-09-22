@@ -321,10 +321,10 @@ wxString WebModelsPanel::SuggestDownloadPath(const std::string &provider_id, con
     boost::system::error_code ec;
     boost::filesystem::create_directories(dir, ec);
     wxFileName fn(suggested);
-    std::string name = sanitize_filename(fn.GetFullName().ToUTF8().data());
+    std::string name = sanitize_model_filename(fn.GetFullName().ToUTF8().data());
     if (name.empty() || name == "model") {
         wxFileName fu(uri);
-        name = sanitize_filename(fu.GetFullName().ToUTF8().data());
+        name = sanitize_model_filename(fu.GetFullName().ToUTF8().data());
     }
     if (name.empty() || name.find('.') == std::string::npos)
         name = "model.3mf";

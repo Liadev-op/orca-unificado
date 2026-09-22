@@ -99,7 +99,8 @@ std::vector<BambuToU1Converter::Filament> parse_filaments_from_contents(const st
     static const std::regex fil_re(
         R"(<filament\b([^>]*)/?>)",
         std::regex::icase);
-    static const std::regex attr_re(R"(([a-zA-Z_]+)\s*=\s*"([^"]*)")");
+    // MSVC C2001: raw-string R"(...)" cannot contain )" — use a custom delimiter.
+    static const std::regex attr_re(R"re(([a-zA-Z_]+)\s*=\s*"([^"]*)")re");
     for (std::sregex_iterator it(slice_info.begin(), slice_info.end(), fil_re), end; it != end; ++it) {
         BambuToU1Converter::Filament f;
         std::string attrs = (*it)[1].str();
@@ -177,7 +178,7 @@ json load_u1_template(bool supports)
 
 std::string replace_printer_model_id(std::string xml)
 {
-    static const std::regex re(R"(key="printer_model_id"\s+value="[^"]*")");
+    static const std::regex re(R"re(key="printer_model_id"\s+value="[^"]*")re");
     if (std::regex_search(xml, re))
         return std::regex_replace(xml, re, "key=\"printer_model_id\" value=\"Snapmaker U1\"");
     static const std::regex re2(R"(key='printer_model_id'\s+value='[^']*')");
@@ -201,7 +202,7 @@ std::string rewrite_slice_info(const std::string &xml,
         rebuilt.append(last, (*it)[0].first);
         last = (*it)[0].second;
         std::string tag = it->str();
-        static const std::regex id_re(R"(\bid\s*=\s*"([^"]*)")", std::regex::icase);
+        static const std::regex id_re(R"re(\bid\s*=\s*"([^"]*)")re", std::regex::icase);
         std::smatch m;
         std::string old_id;
         if (std::regex_search(tag, m, id_re))
@@ -245,7 +246,7 @@ std::string rewrite_slice_info(const std::string &xml,
 std::string rewrite_model_settings(const std::string &xml, const std::map<std::string, std::string> &id_mapping)
 {
     std::string out = xml;
-    static const std::regex re(R"(<metadata\s+key="extruder"\s+value="([^"]*)")", std::regex::icase);
+    static const std::regex re(R"re(<metadata\s+key="extruder"\s+value="([^"]*)")re", std::regex::icase);
     std::string result;
     result.reserve(out.size());
     std::sregex_iterator it(out.begin(), out.end(), re), end;
@@ -540,7 +541,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
     boost::filesystem::create_directories(dest_dir, ec);
     std::string stem = src_3mf.stem().string();
     boost::replace_all(stem, "-U1", "");
-    auto dest = dest_dir / (sanitize_filename(stem) + "-U1.3mf");
+    auto dest = dest_dir / (sanitize_model_filename(stem) + "-U1.3mf");
     if (!write_converted_zip(src_3mf, dest, new_slice, new_model, new_proj)) {
         r.error = "Conversion failed while writing the U1 3MF.";
         return r;

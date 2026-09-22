@@ -110,7 +110,7 @@ boost::filesystem::path converter_resources_dir()
     return boost::filesystem::path(resources_dir()) / "converter";
 }
 
-std::string sanitize_filename(const std::string &name)
+std::string sanitize_model_filename(const std::string &name)
 {
     std::string out;
     out.reserve(name.size());

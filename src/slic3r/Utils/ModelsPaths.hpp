@@ -21,7 +21,8 @@ boost::filesystem::path converter_resources_dir();
 
 boost::filesystem::path exe_dir();
 
-std::string sanitize_filename(const std::string &name);
+// Distinct from Slic3r::sanitize_filename in libslic3r/Utils.hpp (inline).
+std::string sanitize_model_filename(const std::string &name);
 
 } // namespace Slic3r
 
