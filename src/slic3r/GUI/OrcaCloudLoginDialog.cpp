@@ -86,7 +86,7 @@ int OrcaCloudLoginDialog::ensure_loopback_port()
 }
 
 OrcaCloudLoginDialog::OrcaCloudLoginDialog(std::shared_ptr<ICloudServiceAgent> cloud_agent)
-    : wxDialog((wxWindow*) (wxGetApp().mainframe), wxID_ANY, "Orca Cloud"), m_cloud_agent(cloud_agent)
+    : wxDialog((wxWindow*) (wxGetApp().mainframe), wxID_ANY, _L("Orca Cloud account (presets)")), m_cloud_agent(cloud_agent)
 {
     SetBackgroundColour(*wxWHITE);
 
@@ -97,7 +97,7 @@ OrcaCloudLoginDialog::OrcaCloudLoginDialog(std::shared_ptr<ICloudServiceAgent> c
         m_sizer_main->Add(m_line_top, 0, wxEXPAND, 0);
 
         auto* m_message = new wxStaticText(this, wxID_ANY,
-                                          _L("Orca Cloud is not available. Please restart Orca Unificado and try again."),
+                                          _L("Orca Cloud is not available. Please restart Orca Unificado and try again.\nThis login is only for preset sync between PCs, not the Snapmaker account that binds the U1."),
                                           wxDefaultPosition, wxDefaultSize, 0);
         m_message->SetForegroundColour(*wxBLACK);
         m_message->Wrap(FromDIP(360));
@@ -142,10 +142,26 @@ OrcaCloudLoginDialog::OrcaCloudLoginDialog(std::shared_ptr<ICloudServiceAgent> c
     Bind(wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, &OrcaCloudLoginDialog::OnScriptMessage, this, m_browser->GetId());
 
     // UI
-    SetTitle(_L("Orca Cloud"));
+    SetTitle(_L("Orca Cloud account (presets)"));
     // Set a more sensible size for web browsing
     wxSize pSize = FromDIP(wxSize(650, 840));
     SetSize(pSize);
+
+    auto* bar = new wxPanel(this, wxID_ANY);
+    bar->SetBackgroundColour(wxColour(255, 244, 214));
+    auto* banner = new wxStaticText(bar, wxID_ANY,
+        _L("Orca Cloud account — cloud.orcaslicer.com. Syncs printer, filament and process presets between PCs. This is not the Snapmaker account used to bind the U1."),
+        wxDefaultPosition, wxDefaultSize, 0);
+    banner->Wrap(FromDIP(610));
+    banner->SetForegroundColour(wxColour(60, 50, 20));
+    auto* bar_sizer = new wxBoxSizer(wxVERTICAL);
+    bar_sizer->Add(banner, 0, wxALL | wxEXPAND, FromDIP(8));
+    bar->SetSizer(bar_sizer);
+
+    auto* sizer = new wxBoxSizer(wxVERTICAL);
+    sizer->Add(bar, 0, wxEXPAND);
+    sizer->Add(m_browser, 1, wxEXPAND);
+    SetSizer(sizer);
 
     CentreOnParent();
     wxGetApp().UpdateDlgDarkUI(this);
