@@ -2654,8 +2654,12 @@ void MainFrame::init_menubar_as_editor()
         append_menu_item(fileMenu, wxID_ANY, _L("Convert Bambu 3MF to U1") + dots,
             _L("Rewrite a MakerWorld/Bambu project as a Snapmaker U1 3MF, keeping color painting. Runs locally; does not call bl2u1.nbn.cat."),
             [this](wxCommandEvent &) {
-                if (m_models_panel)
-                    m_models_panel->convert_file_dialog();
+                try {
+                    if (m_models_panel)
+                        m_models_panel->convert_file_dialog();
+                } catch (...) {
+                    wxMessageBox(_L("Convert to U1 failed. The app stayed open."), _L("Orca Unificado"), wxOK | wxICON_ERROR);
+                }
             },
             "", nullptr, []() { return true; }, this);
 

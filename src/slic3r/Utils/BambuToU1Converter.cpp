@@ -15,6 +15,7 @@
 #include <map>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 
 using json = nlohmann::json;
 
@@ -23,6 +24,57 @@ namespace Slic3r {
 namespace {
 
 constexpr const char *k_default_profile = "Snapmaker PLA SnapSpeed @U1";
+
+std::string json_as_string(const json &j, const char *key, const std::string &def = {})
+{
+    if (!j.is_object() || !j.contains(key))
+        return def;
+    const auto &v = j.at(key);
+    try {
+        if (v.is_string())
+            return v.get<std::string>();
+        if (v.is_boolean())
+            return v.get<bool>() ? "1" : "0";
+        if (v.is_number_integer())
+            return std::to_string(v.get<long long>());
+        if (v.is_number())
+            return std::to_string(v.get<double>());
+    } catch (...) {}
+    return def;
+}
+
+bool json_truthy(const json &j, const char *key)
+{
+    if (!j.is_object() || !j.contains(key))
+        return false;
+    const auto &v = j.at(key);
+    try {
+        if (v.is_string()) {
+            const auto s = v.get<std::string>();
+            return s == "1" || s == "true" || s == "True" || s == "TRUE";
+        }
+        if (v.is_boolean())
+            return v.get<bool>();
+        if (v.is_number())
+            return v.get<double>() != 0.0;
+    } catch (...) {}
+    return false;
+}
+
+json json_as_array(const json &j, const char *key)
+{
+    if (!j.is_object() || !j.contains(key))
+        return json::array();
+    const auto &v = j.at(key);
+    if (v.is_array())
+        return v;
+    if (v.is_string()) {
+        json arr = json::array();
+        arr.push_back(v.get<std::string>());
+        return arr;
+    }
+    return json::array();
+}
 
 std::string read_zip_entry(mz_zip_archive &zip, const char *name)
 {
@@ -64,7 +116,7 @@ json load_filament_map()
 {
     json arr = json::array();
     auto p   = converter_resources_dir() / "u1_filament_map.json";
-    boost::nowide::ifstream in(p.string().c_str());
+    boost::nowide::ifstream in(path_as_utf8(p).c_str());
     if (in) {
         try {
             in >> arr;
@@ -87,8 +139,10 @@ json load_filament_map()
 std::string profile_for_type(const json &map, const std::string &type)
 {
     for (const auto &it : map) {
-        if (it.value("type", "") == type)
-            return it.value("settings_id", k_default_profile);
+        if (json_as_string(it, "type") == type) {
+            auto sid = json_as_string(it, "settings_id", k_default_profile);
+            return sid.empty() ? k_default_profile : sid;
+        }
     }
     return k_default_profile;
 }
@@ -127,8 +181,8 @@ std::vector<BambuToU1Converter::Filament> parse_filaments_from_contents(const st
         return filaments;
     try {
         json cfg = json::parse(project_settings);
-        auto colors = cfg.value("filament_colour", json::array());
-        auto types  = cfg.value("filament_type", json::array());
+        auto colors = json_as_array(cfg, "filament_colour");
+        auto types  = json_as_array(cfg, "filament_type");
         for (size_t i = 0; i < colors.size(); ++i) {
             BambuToU1Converter::Filament f;
             f.id    = std::to_string(i + 1);
@@ -147,7 +201,7 @@ json load_u1_template(bool supports)
     mz_zip_archive zip;
     mz_zip_zero_struct(&zip);
     json cfg;
-    if (open_zip_reader(&zip, p.string())) {
+    if (open_zip_reader(&zip, path_as_utf8(p))) {
         auto raw = read_zip_entry(zip, "Metadata/project_settings.config");
         close_zip_reader(&zip);
         if (!raw.empty()) {
@@ -158,7 +212,7 @@ json load_u1_template(bool supports)
     }
     if (cfg.is_null() || cfg.empty()) {
         auto jp = converter_resources_dir() / (supports ? "u1_template_supports.json" : "u1_template.json");
-        boost::nowide::ifstream in(jp.string().c_str());
+        boost::nowide::ifstream in(path_as_utf8(jp).c_str());
         if (in) {
             try {
                 in >> cfg;
@@ -265,6 +319,8 @@ std::string rewrite_model_settings(const std::string &xml, const std::map<std::s
 
 void normalize_filament_arrays(json &cfg)
 {
+    if (!cfg.is_object())
+        return;
     const int n = BambuToU1Converter::k_target_filaments;
     for (auto it = cfg.begin(); it != cfg.end(); ++it) {
         if (!boost::algorithm::starts_with(it.key(), "filament_"))
@@ -296,9 +352,9 @@ bool write_converted_zip(const boost::filesystem::path &src,
     mz_zip_archive zout;
     mz_zip_zero_struct(&zin);
     mz_zip_zero_struct(&zout);
-    if (!open_zip_reader(&zin, src.string()))
+    if (!open_zip_reader(&zin, path_as_utf8(src)))
         return false;
-    if (!open_zip_writer(&zout, dst.string())) {
+    if (!open_zip_writer(&zout, path_as_utf8(dst))) {
         close_zip_reader(&zin);
         return false;
     }
@@ -386,7 +442,7 @@ std::string make_minimal_bambu_3mf(const boost::filesystem::path &path, int n_fi
 
     mz_zip_archive zip;
     mz_zip_zero_struct(&zip);
-    if (!open_zip_writer(&zip, path.string()))
+    if (!open_zip_writer(&zip, path_as_utf8(path)))
         return "open writer";
     bool ok = mz_zip_writer_add_mem(&zip, "Metadata/slice_info.config", slice.str().data(), slice.str().size(), MZ_DEFAULT_COMPRESSION) &&
               mz_zip_writer_add_mem(&zip, "Metadata/model_settings.config", model.data(), model.size(), MZ_DEFAULT_COMPRESSION) &&
@@ -401,20 +457,24 @@ std::string make_minimal_bambu_3mf(const boost::filesystem::path &path, int n_fi
 
 bool BambuToU1Converter::is_bambu_project(const boost::filesystem::path &src_3mf)
 {
-    mz_zip_archive zip;
-    mz_zip_zero_struct(&zip);
-    if (!open_zip_reader(&zip, src_3mf.string()))
+    try {
+        mz_zip_archive zip;
+        mz_zip_zero_struct(&zip);
+        if (!open_zip_reader(&zip, path_as_utf8(src_3mf)))
+            return false;
+        bool ok = zip_has(zip, "Metadata/project_settings.config");
+        close_zip_reader(&zip);
+        return ok;
+    } catch (...) {
         return false;
-    bool ok = zip_has(zip, "Metadata/project_settings.config");
-    close_zip_reader(&zip);
-    return ok;
+    }
 }
 
 std::vector<BambuToU1Converter::Filament> BambuToU1Converter::analyze(const boost::filesystem::path &src_3mf, std::string *error)
 {
     mz_zip_archive zip;
     mz_zip_zero_struct(&zip);
-    if (!open_zip_reader(&zip, src_3mf.string())) {
+    if (!open_zip_reader(&zip, path_as_utf8(src_3mf))) {
         if (error)
             *error = "Not a valid 3MF/ZIP archive.";
         return {};
@@ -438,6 +498,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
                                                        const std::vector<Pick>       &keep_picks)
 {
     Result r;
+    try {
     std::string err;
     auto filaments = analyze(src_3mf, &err);
     r.filaments    = filaments;
@@ -466,7 +527,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
 
     mz_zip_archive zip;
     mz_zip_zero_struct(&zip);
-    if (!open_zip_reader(&zip, src_3mf.string())) {
+    if (!open_zip_reader(&zip, path_as_utf8(src_3mf))) {
         r.error = "Not a valid 3MF/ZIP archive.";
         return r;
     }
@@ -486,14 +547,14 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
     }
 
     bool has_support = false;
-    auto diff        = orig_settings.value("different_settings_to_system", json::array());
+    auto diff        = json_as_array(orig_settings, "different_settings_to_system");
     if (diff.is_array()) {
         for (const auto &s : diff) {
             if (s.is_string() && s.get<std::string>().find("enable_support") != std::string::npos)
                 has_support = true;
         }
     }
-    if (orig_settings.value("enable_support", "0") == "1" || orig_settings.value("enable_support", 0) == 1)
+    if (json_truthy(orig_settings, "enable_support"))
         has_support = true;
 
     json combined = load_u1_template(has_support);
@@ -539,7 +600,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
 
     boost::system::error_code ec;
     boost::filesystem::create_directories(dest_dir, ec);
-    std::string stem = src_3mf.stem().string();
+    std::string stem = path_as_utf8(src_3mf.stem());
     boost::replace_all(stem, "-U1", "");
     auto dest = dest_dir / (sanitize_model_filename(stem) + "-U1.3mf");
     if (!write_converted_zip(src_3mf, dest, new_slice, new_model, new_proj)) {
@@ -547,9 +608,20 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
         return r;
     }
     r.ok          = true;
-    r.output_path = dest.string();
+    r.output_path = path_as_utf8(dest);
     BOOST_LOG_TRIVIAL(info) << "BambuToU1: wrote " << r.output_path << " supports=" << has_support;
     return r;
+    } catch (const std::exception &e) {
+        BOOST_LOG_TRIVIAL(error) << "BambuToU1: convert exception: " << e.what();
+        r.ok = false;
+        r.error = std::string("Conversion failed: ") + e.what();
+        return r;
+    } catch (...) {
+        BOOST_LOG_TRIVIAL(error) << "BambuToU1: convert unknown exception";
+        r.ok = false;
+        r.error = "Conversion failed (unknown error).";
+        return r;
+    }
 }
 
 bool BambuToU1Converter::smoke_test(std::string &error)
@@ -579,7 +651,7 @@ bool BambuToU1Converter::smoke_test(std::string &error)
         return false;
     }
     {
-        boost::nowide::ofstream o(stl.string().c_str());
+        boost::nowide::ofstream o(path_as_utf8(stl).c_str());
         o << "solid nope\nendsolid nope\n";
     }
     if (is_bambu_project(stl)) {

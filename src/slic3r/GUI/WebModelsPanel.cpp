@@ -108,7 +108,7 @@ void WebModelsPanel::BuildUi()
     m_local_list = new wxListBox(m_local_panel, wxID_ANY);
     ls->Add(m_local_list, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
     m_local_list->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &e) {
-        m_last_file = e.GetString().ToUTF8().data();
+        m_last_file = into_u8(e.GetString());
         m_last_converted.clear();
         UpdateChrome();
     });
@@ -181,11 +181,12 @@ void WebModelsPanel::EnsureProviderHost(const std::string &id)
         "OrcaUnificado/%s (%s) Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
         SLIC3R_VERSION, prov->user_agent_tag());
-    auto *host = new WebView2Host(m_browser_stack, wxString::FromUTF8(profile.string()), ua);
+    auto *host = new WebView2Host(m_browser_stack, from_path(profile), ua);
     m_hosts[id] = host;
     m_stack_sizer->Add(host, 1, wxEXPAND);
     host->Hide();
 
+    host->SetDefaultDownloadFolder(from_path(models_provider_dir(id, true)));
     host->SetDownloadPathSuggester([this, id](const wxString &uri, const wxString &suggested) {
         return SuggestDownloadPath(id, uri, suggested);
     });
@@ -255,7 +256,7 @@ void WebModelsPanel::RefreshLocalList()
             auto ext = it->path().extension().string();
             boost::to_lower(ext);
             if (ext == ".3mf" || ext == ".stl" || ext == ".zip" || ext == ".obj")
-                m_local_list->Append(wxString::FromUTF8(it->path().string()));
+                m_local_list->Append(from_path(it->path()));
         }
     };
     add_dir(models_root_dir(true));
@@ -328,7 +329,7 @@ wxString WebModelsPanel::SuggestDownloadPath(const std::string &provider_id, con
     }
     if (name.empty() || name.find('.') == std::string::npos)
         name = "model.3mf";
-    return wxString::FromUTF8((dir / name).string());
+    return from_path(dir / name);
 }
 
 void WebModelsPanel::OnDownloadFinished(const std::string &provider_id, const wxString &path)
@@ -414,19 +415,25 @@ bool WebModelsPanel::PickFilamentsIfNeeded(const BambuToU1Converter::Result &fir
 
 bool WebModelsPanel::ConvertPath(const std::string &src, std::string *out_converted)
 {
-    if (!BambuToU1Converter::is_bambu_project(src)) {
+    try {
+    if (src.empty()) {
+        WarningDialog(this, _L("No file selected."), _L("Convert to U1"), wxOK).ShowModal();
+        return false;
+    }
+    boost::filesystem::path src_path(src);
+    if (!BambuToU1Converter::is_bambu_project(src_path)) {
         WarningDialog(this,
                       _L("This file is not a Bambu/MakerWorld project 3MF. STL and Printables files should be imported as geometry."),
                       _L("Convert to U1"), wxOK)
             .ShowModal();
         return false;
     }
-    auto first = BambuToU1Converter::convert(src, models_converted_dir(true), {});
+    auto first = BambuToU1Converter::convert(src_path, models_converted_dir(true), {});
     std::vector<BambuToU1Converter::Pick> picks;
     if (first.need_filament_pick) {
         if (!PickFilamentsIfNeeded(first, picks))
             return false;
-        first = BambuToU1Converter::convert(src, models_converted_dir(true), picks);
+        first = BambuToU1Converter::convert(src_path, models_converted_dir(true), picks);
     }
     if (!first.ok) {
         ErrorDialog(this, wxString::FromUTF8(first.error), false).ShowModal();
@@ -440,6 +447,14 @@ bool WebModelsPanel::ConvertPath(const std::string &src, std::string *out_conver
                                 wxString::FromUTF8(first.output_path)))
         .ShowModal();
     return true;
+    } catch (const std::exception &e) {
+        BOOST_LOG_TRIVIAL(error) << "Models ConvertPath: " << e.what();
+        ErrorDialog(this, wxString::Format(_L("Convert to U1 failed: %s\nThe app stayed open."), from_u8(e.what())), false).ShowModal();
+        return false;
+    } catch (...) {
+        ErrorDialog(this, _L("Convert to U1 failed (unknown error). The app stayed open."), false).ShowModal();
+        return false;
+    }
 }
 
 void WebModelsPanel::OnConvert()

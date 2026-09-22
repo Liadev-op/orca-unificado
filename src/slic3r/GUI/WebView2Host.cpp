@@ -6,8 +6,10 @@
 
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/convert.hpp>
+#include <exception>
 #include <iomanip>
 
+#include <wx/filename.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/webview.h>
@@ -127,6 +129,34 @@ void WebView2Host::ResizeNative()
     m_native->controller->put_Bounds(rc);
 #endif
 }
+
+void WebView2Host::SetDefaultDownloadFolder(const wxString &folder)
+{
+    m_default_dl_folder = folder;
+#ifdef _WIN32
+    ApplyDefaultDownloadFolder();
+#endif
+}
+
+#ifdef _WIN32
+void WebView2Host::ApplyDefaultDownloadFolder()
+{
+    if (m_default_dl_folder.empty() || !m_native || !m_native->webview)
+        return;
+    try {
+        ComPtr<ICoreWebView2_13> wv13;
+        if (FAILED(m_native->webview.As(&wv13)) || !wv13)
+            return;
+        ComPtr<ICoreWebView2Profile> profile;
+        if (FAILED(wv13->get_Profile(&profile)) || !profile)
+            return;
+        HRESULT hr = profile->put_DefaultDownloadFolderPath(m_default_dl_folder.wc_str());
+        BOOST_LOG_TRIVIAL(info) << "Models WebView2 DefaultDownloadFolderPath hr=" << std::hex << hr;
+    } catch (...) {
+        BOOST_LOG_TRIVIAL(error) << "Models WebView2: DefaultDownloadFolderPath threw";
+    }
+}
+#endif
 
 void WebView2Host::Navigate(const wxString &url)
 {
@@ -265,6 +295,7 @@ void WebView2Host::StartWebView2()
                             }
 
                             m_native->webview.As(&m_native->webview4);
+                            ApplyDefaultDownloadFolder();
                             if (m_native->webview4) {
                                 m_native->webview4->add_DownloadStarting(
                                     Callback<ICoreWebView2DownloadStartingEventHandler>(
@@ -365,9 +396,12 @@ void WebView2Host::StartWebView2()
                                         args->get_Uri(&uri);
                                         wxString u = lpwstr_to_wx(uri);
                                         free_co_str(uri);
+                                        HRESULT hr = args->put_NewWindow(m_native->webview.Get());
                                         args->put_Handled(TRUE);
-                                        if (!u.empty())
+                                        if (FAILED(hr) && !u.empty() && !u.StartsWith("about:") && !u.StartsWith("blob:"))
                                             m_native->webview->Navigate(u.wc_str());
+                                        BOOST_LOG_TRIVIAL(info) << "Models NewWindowRequested uri=" << u.ToUTF8().data()
+                                                                << " put_NewWindow hr=" << std::hex << hr;
                                         return S_OK;
                                     })
                                     .Get(),
