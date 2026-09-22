@@ -99,7 +99,7 @@ std::vector<BambuToU1Converter::Filament> parse_filaments_from_contents(const st
     static const std::regex fil_re(
         R"(<filament\b([^>]*)/?>)",
         std::regex::icase);
-    static const std::regex attr_re(R"(([a-zA-Z_]+)\s*=\s*\"([^\"]*)\")");
+    static const std::regex attr_re(R"(([a-zA-Z_]+)\s*=\s*"([^"]*)")");
     for (std::sregex_iterator it(slice_info.begin(), slice_info.end(), fil_re), end; it != end; ++it) {
         BambuToU1Converter::Filament f;
         std::string attrs = (*it)[1].str();
@@ -177,7 +177,7 @@ json load_u1_template(bool supports)
 
 std::string replace_printer_model_id(std::string xml)
 {
-    static const std::regex re(R"(key=\"printer_model_id\"\s+value=\"[^\"]*\")");
+    static const std::regex re(R"(key="printer_model_id"\s+value="[^"]*")");
     if (std::regex_search(xml, re))
         return std::regex_replace(xml, re, "key=\"printer_model_id\" value=\"Snapmaker U1\"");
     static const std::regex re2(R"(key='printer_model_id'\s+value='[^']*')");
@@ -201,7 +201,7 @@ std::string rewrite_slice_info(const std::string &xml,
         rebuilt.append(last, (*it)[0].first);
         last = (*it)[0].second;
         std::string tag = it->str();
-        static const std::regex id_re(R"(\bid\s*=\s*\"([^\"]*)\")", std::regex::icase);
+        static const std::regex id_re(R"(\bid\s*=\s*"([^"]*)")", std::regex::icase);
         std::smatch m;
         std::string old_id;
         if (std::regex_search(tag, m, id_re))
@@ -245,7 +245,7 @@ std::string rewrite_slice_info(const std::string &xml,
 std::string rewrite_model_settings(const std::string &xml, const std::map<std::string, std::string> &id_mapping)
 {
     std::string out = xml;
-    static const std::regex re(R"(<metadata\s+key=\"extruder\"\s+value=\"([^\"]*)\")", std::regex::icase);
+    static const std::regex re(R"(<metadata\s+key="extruder"\s+value="([^"]*)")", std::regex::icase);
     std::string result;
     result.reserve(out.size());
     std::sregex_iterator it(out.begin(), out.end(), re), end;
