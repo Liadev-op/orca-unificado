@@ -1,8 +1,8 @@
 name: Apply M2 download + converter no-throw
 
-# One-shot: apply the C++ patch, commit, then workflow_dispatch
-# windows-build.yml (tag m2-windows). Does not overwrite m1-windows.
-# This branch is NOT added to windows-build.yml on.push.
+# One-shot: run .github/scripts/m2-surgical.py, commit, dispatch
+# windows-build.yml to tag m2-windows. Does not overwrite m1-windows.
+# trigger: liadev-report-2-20260922
 on:
   workflow_dispatch:
   push:
@@ -24,44 +24,13 @@ jobs:
         with:
           ref: cursor/m2-models-webview-59e1
 
-      - name: Apply download + converter patch
+      - name: Surgical patch converter + WebView2 + panel + MainFrame
         run: |
-          if [ -f .github/patches/m2-download-convert.p0 ]; then
-            cat .github/patches/m2-download-convert.p0 \
-                .github/patches/m2-download-convert.p1 \
-                .github/patches/m2-download-convert.p2 > /tmp/m2-download-convert.patch
-            git apply --whitespace=nowarn /tmp/m2-download-convert.patch
-          elif [ -f .github/patches/m2-download-convert.patch ]; then
-            git apply --whitespace=nowarn .github/patches/m2-download-convert.patch
-          fi
-          python3 <<'PY'
-          from pathlib import Path
-          p = Path("src/slic3r/GUI/MainFrame.cpp")
-          t = p.read_text(encoding="utf-8")
-          old = """            [this](wxCommandEvent &) {
-                if (m_models_panel)
-                    m_models_panel->convert_file_dialog();
-            },"""
-          new = """            [this](wxCommandEvent &) {
-                try {
-                    if (m_models_panel)
-                        m_models_panel->convert_file_dialog();
-                } catch (...) {
-                    wxMessageBox(_L("Convert to U1 failed. The app stayed open."), _L("Orca Unificado"), wxOK | wxICON_ERROR);
-                }
-            },"""
-          if "Convert to U1 failed. The app stayed open." in t:
-              print("mainframe already patched")
-          elif old not in t:
-              raise SystemExit("mainframe snippet missing")
-          else:
-              p.write_text(t.replace(old, new, 1), encoding="utf-8")
-              print("patched mainframe")
-          PY
-          git add src/slic3r/Utils/ModelsPaths.hpp src/slic3r/Utils/ModelsPaths.cpp \
-                  src/slic3r/Utils/BambuToU1Converter.cpp \
-                  src/slic3r/GUI/WebView2Host.hpp src/slic3r/GUI/WebView2Host.cpp \
-                  src/slic3r/GUI/WebModelsPanel.cpp src/slic3r/GUI/MainFrame.cpp
+          python3 .github/scripts/m2-surgical.py
+          git add src/slic3r/Utils/BambuToU1Converter.cpp \
+                  src/slic3r/GUI/WebView2Host.cpp \
+                  src/slic3r/GUI/WebModelsPanel.cpp \
+                  src/slic3r/GUI/MainFrame.cpp
           git config user.name "Liadev"
           git config user.email "122531419+Liadev-op@users.noreply.github.com"
           if git diff --cached --quiet; then
