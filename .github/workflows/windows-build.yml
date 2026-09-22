@@ -1,6 +1,10 @@
 # Windows portable of Orca Unificado (Snapmaker Orca 2.4.0 + M1 Orca Cloud).
 # Same pipeline as Snapmaker v2.4.0: VS2022, cached deps, build_release_vs2022.bat.
 # First run builds deps (~1-2 h) then the slicer. Later runs reuse Actions cache.
+#
+# Portable datadir: the zip ships `data_dir/` next to the exe.
+# GUI_App::init_app_config already uses that folder (native Orca/SnOrca).
+# Fallback: --datadir. Without the folder, Windows would use %APPDATA%\OrcaUnificado.
 name: Windows build
 
 on:
@@ -20,6 +24,110 @@ permissions:
   actions: read
 
 jobs:
+  # Same binary Liadev already tested (m1-windows), plus native data_dir folder.
+  # Publishes in minutes so the portable zip is usable while the from-source rebuild runs.
+  inject-datadir:
+    name: Inject data_dir into current zip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ver: V2.4.0
+    steps:
+      - name: Download current portable zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HOME/old"
+          gh release download m1-windows --repo "${{ github.repository }}" \
+            -p "OrcaUnificado_Windows_*_portable.zip" -D "$HOME/old"
+          ls -lh "$HOME/old"
+
+      - name: Inject data_dir folder
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import zipfile, io, os
+          from pathlib import Path
+          old_dir = Path.home() / "old"
+          zips = list(old_dir.glob("OrcaUnificado_Windows_*_portable.zip"))
+          if not zips:
+              raise SystemExit(f"no zip in {old_dir}: {list(old_dir.iterdir())}")
+          src = zips[0]
+          print("source", src, "size", src.stat().st_size)
+          leeme_data = """Orca Unificado — carpeta portable (data_dir)
+============================================
+
+Mecanismo nativo de Orca/SnOrca: si existe la carpeta "data_dir" junto
+al exe, el slicer guarda aquí perfiles, cache, logs, presets de usuario
+(user/<UUID>/) y el plugin Bambu opcional.
+
+No usa %APPDATA%\\OrcaUnificado, ni Snapmaker_Orca, ni OrcaSlicer.
+
+No borres esta carpeta. Si falta, la app cae a APPDATA.
+Si vienes del zip anterior, copia aquí el contenido de
+%APPDATA%\\OrcaUnificado para no repetir el wizard/login.
+
+Fallback: snapmaker-orca.exe --datadir "D:\\ruta\\absoluta"
+"""
+          leeme_root = """Orca Unificado (portable)
+=========================
+
+1. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).
+2. La configuración se crea en la carpeta data_dir, junto a este archivo.
+3. Copia esta carpeta entera a otro PC: perfiles y cuenta viajan con el zip.
+
+No pisa %APPDATA% de Snapmaker Orca ni de Orca Slicer.
+"""
+          out = Path.home() / f"OrcaUnificado_Windows_{os.environ['ver']}_portable.zip"
+          with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+              names = zin.namelist()
+              if not any(n.replace("\\", "/").endswith("snapmaker-orca.exe") for n in names):
+                  raise SystemExit(f"exe missing in zip, sample={names[:20]}")
+              for info in zin.infolist():
+                  data = zin.read(info.filename)
+                  norm = info.filename.replace("\\", "/")
+                  if "/data_dir/" in f"/{norm}" or norm.rstrip("/").endswith("data_dir") or norm.endswith("LEEME.txt"):
+                      continue
+                  zout.writestr(info, data)
+              exe = next(n.replace("\\", "/") for n in names if n.replace("\\", "/").endswith("snapmaker-orca.exe"))
+              root = exe.rsplit("/", 1)[0] if "/" in exe else "OrcaUnificado"
+              for rel, text in (
+                  (f"{root}/data_dir/LEEME.txt", leeme_data),
+                  (f"{root}/LEEME.txt", leeme_root),
+              ):
+                  zout.writestr(rel, text.encode("utf-8"))
+          print("wrote", out, "size", out.stat().st_size)
+          with zipfile.ZipFile(out) as z:
+              hits = [n for n in z.namelist() if any(k in n.replace("\\", "/") for k in ("data_dir", "LEEME", "snapmaker-orca.exe"))]
+              print("\n".join(hits))
+          PY
+
+      - name: Publish GitHub prerelease (datadir)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: m1-windows
+          target_commitish: ${{ github.sha }}
+          name: Orca Unificado Windows (M1, portable data_dir)
+          prerelease: true
+          make_latest: false
+          files: /home/runner/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
+          body: |
+            Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado).
+            Self-contained: la config vive en `data_dir` junto al exe (mecanismo nativo Orca/SnOrca, PR SoftFever #6780).
+            No pisa %APPDATA%\Snapmaker_Orca ni %APPDATA%\OrcaSlicer ni %APPDATA%\OrcaUnificado.
+
+            1. Descarga el zip.
+            2. Extrae la carpeta OrcaUnificado.
+            3. Ejecuta snapmaker-orca.exe.
+            4. Tras el primer arranque verás `OrcaUnificado\data_dir\` (user, cache, log, OrcaUnificado.conf, etc.).
+
+            Si usaste el zip anterior, copia el contenido de `%APPDATA%\OrcaUnificado` a `data_dir` para no repetir el wizard.
+
+            Fallback: `snapmaker-orca.exe --datadir "D:\ruta"`.
+            Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (el CPACK de SnOrca pisaría el instalador oficial Snapmaker).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   windows:
     name: Deps + slicer (windows-2022)
     runs-on: windows-2022
@@ -88,7 +196,7 @@ jobs:
         run: |
           $ok = "false"
           $root = "deps/build/OrcaSlicer_dep/usr/local"
-          if ((Test-Path "$root/lib/libcrypto.lib") -and (Test-Path "$root/lib/libssl.lib") -and (Test-Path "$root/include/openssl/opensslv.h")) {
+          if ((Test-Path "$root/lib/libcrypto.lib") -and (Test-Path "$root/include/openssl/opensslv.h") -and (Test-Path "$root/lib/libssl.lib")) {
             $ok = "true"
           }
           "ok=$ok" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
@@ -156,12 +264,46 @@ jobs:
           $dest = Join-Path $env:GITHUB_WORKSPACE "build\\OrcaUnificado"
           if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
           Copy-Item -Recurse $prefix $dest
+
+          $dataDir = Join-Path $dest "data_dir"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          $leemeData = @(
+            'Orca Unificado — carpeta portable (data_dir)',
+            '============================================',
+            '',
+            'Mecanismo nativo de Orca/SnOrca: si existe la carpeta "data_dir" junto',
+            'al exe, el slicer guarda aquí perfiles, cache, logs, presets de usuario',
+            '(user/<UUID>/) y el plugin Bambu opcional.',
+            '',
+            'No usa %APPDATA%\\OrcaUnificado, ni Snapmaker_Orca, ni OrcaSlicer.',
+            '',
+            'No borres esta carpeta. Si falta, la app cae a APPDATA.',
+            'Si vienes del zip anterior, copia aquí el contenido de',
+            '%APPDATA%\\OrcaUnificado para no repetir el wizard/login.',
+            '',
+            'Fallback: snapmaker-orca.exe --datadir "D:\\ruta\\absoluta"'
+          ) -join "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path $dataDir "LEEME.txt"), $leemeData + "`r`n", $utf8)
+          $leemeRoot = @(
+            'Orca Unificado (portable)',
+            '=========================',
+            '',
+            '1. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).',
+            '2. La configuración se crea en la carpeta data_dir, junto a este archivo.',
+            '3. Copia esta carpeta entera a otro PC: perfiles y cuenta viajan con el zip.',
+            '',
+            'No pisa %APPDATA% de Snapmaker Orca ni de Orca Slicer.'
+          ) -join "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path $dest "LEEME.txt"), $leemeRoot + "`r`n", $utf8)
+
           $zipName = "OrcaUnificado_Windows_$($env:ver)_portable.zip"
           $zip = Join-Path $env:GITHUB_WORKSPACE "build\\$zipName"
           if (Test-Path $zip) { Remove-Item -Force $zip }
           & "C:\\Program Files\\7-Zip\\7z.exe" a -tzip $zip $dest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item $zip | Format-List FullName, Length
+          & "C:\\Program Files\\7-Zip\\7z.exe" l $zip | Select-String -Pattern "data_dir|LEEME|snapmaker-orca.exe"
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
@@ -176,20 +318,24 @@ jobs:
         with:
           tag_name: m1-windows
           target_commitish: ${{ github.sha }}
-          name: Orca Unificado Windows (M1)
+          name: Orca Unificado Windows (M1, portable data_dir)
           prerelease: true
           make_latest: false
           files: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
           body: |
             Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado).
-            No pisa %APPDATA%\\Snapmaker_Orca ni %APPDATA%\\OrcaSlicer.
+            Self-contained: la config vive en `data_dir` junto al exe (mecanismo nativo Orca/SnOrca, PR SoftFever #6780).
+            No pisa %APPDATA%\Snapmaker_Orca ni %APPDATA%\OrcaSlicer ni %APPDATA%\OrcaUnificado.
 
             1. Descarga el zip.
             2. Extrae la carpeta OrcaUnificado.
-            3. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).
+            3. Ejecuta snapmaker-orca.exe.
+            4. Tras el primer arranque verás `OrcaUnificado\data_dir\` (user, cache, log, OrcaUnificado.conf, etc.).
 
-            Datos: %APPDATA%\\OrcaUnificado.
-            Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (evita pisa el instalador oficial Snapmaker).
+            Si usaste el zip anterior, copia el contenido de `%APPDATA%\OrcaUnificado` a `data_dir` para no repetir el wizard.
+
+            Fallback: `snapmaker-orca.exe --datadir "D:\ruta"`.
+            Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (el CPACK de SnOrca pisaría el instalador oficial Snapmaker).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -204,6 +350,7 @@ jobs:
             "- ver: $($env:ver)",
             "- deps cache: ${{ steps.cache-deps.outputs.cache-hit }}",
             "- deps ok: ${{ steps.deps-ok.outputs.ok }}",
+            "- datadir: data_dir junto al exe (no APPDATA)",
             "- Release: https://github.com/${{ github.repository }}/releases/tag/m1-windows"
           )
           $lines -join [Environment]::NewLine | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8

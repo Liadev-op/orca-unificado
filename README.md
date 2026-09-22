@@ -20,6 +20,18 @@ Login y sync de presets de **Orca Cloud** (`cloud.orcaslicer.com`) encima de SnO
 
 Desactiva Stealth si el login Cloud no abre. El User-Agent HTTP es `OrcaUnificado/2.4.0`; los tokens van a `OrcaUnificado/Auth`, no a la store de Orca Slicer oficial.
 
+## Portable Windows
+
+El zip de [release `m1-windows`](https://github.com/Liadev-op/orca-unificado/releases/tag/m1-windows) incluye una carpeta **`data_dir`** junto a `snapmaker-orca.exe`.
+
+Ese es el mecanismo nativo de Orca/SnOrca (`GUI_App::init_app_config`, PR SoftFever/OrcaSlicer #6780): si esa carpeta existe al lado del binario, perfiles, cache, logs y presets de usuario viven **ahí**. No se usa `%APPDATA%\OrcaUnificado`, ni `Snapmaker_Orca`, ni `OrcaSlicer`.
+
+1. Extrae la carpeta `OrcaUnificado`.
+2. Ejecuta `snapmaker-orca.exe`.
+3. Tras el primer arranque: `OrcaUnificado\data_dir\` (`user\`, `cache\`, `log\`, `OrcaUnificado.conf`, …).
+
+Si usaste un zip anterior que escribía en APPDATA, copia `%APPDATA%\OrcaUnificado\*` dentro de `data_dir`. Fallback: `snapmaker-orca.exe --datadir "D:\ruta\absoluta"`. No borres `data_dir`: si falta, la app cae a APPDATA.
+
 ## Licencia
 
 [AGPL-3.0](LICENSE.txt). Cadena: Slic3r → PrusaSlicer → Bambu Studio → Orca Slicer → Snapmaker Orca → este fork.
@@ -36,4 +48,4 @@ Orca Slicer / SoftFever y Snapmaker Orca / Snapmaker son marcas de sus dueños. 
 
 Igual que SnOrca 2.4.0 (`build_release*`, `build_linux.sh`). Deps pesadas (wxWidgets, OpenGL, deps de Orca). Si hace falta: `git lfs pull` tras clonar.
 
-En agentes cloud sin el árbol de deps completo **no se espera un binario**; el código queda cableado en CMake y GUI. Este entorno no tiene wxWidgets ni las deps de Orca, así que **M1 no se compiló aquí**.
+El zip Windows se publica con `.github/workflows/windows-build.yml` (cache de deps + `build_release_vs2022.bat`). No hace falta instalar Visual Studio en el PC de Liadev.
