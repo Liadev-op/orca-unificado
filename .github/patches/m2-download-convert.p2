@@ -1,0 +1,321 @@
+     json cfg;
+-    if (open_zip_reader(&zip, p.string())) {
+-        auto raw = read_zip_entry(zip, "Metadata/project_settings.config");
+-        close_zip_reader(&zip);
+-        if (!raw.empty()) {
+-            try {
+-                cfg = json::parse(raw);
+-            } catch (...) {}
++    try {
++        const char *name = supports ? "u1_template_supports.3mf" : "u1_template.3mf";
++        auto        p    = converter_resources_dir() / name;
++        mz_zip_archive zip;
++        mz_zip_zero_struct(&zip);
++        if (open_zip_reader(&zip, path_as_utf8(p))) {
++            auto raw = read_zip_entry(zip, "Metadata/project_settings.config");
++            close_zip_reader(&zip);
++            if (!raw.empty()) {
++                try {
++                    cfg = json::parse(raw);
++                } catch (...) {}
++            }
+         }
+-    }
+-    if (cfg.is_null() || cfg.empty()) {
+-        auto jp = converter_resources_dir() / (supports ? "u1_template_supports.json" : "u1_template.json");
+-        boost::nowide::ifstream in(jp.string().c_str());
+-        if (in) {
+-            try {
+-                in >> cfg;
+-            } catch (...) {}
++        if (cfg.is_null() || cfg.empty()) {
++            auto jp = converter_resources_dir() / (supports ? "u1_template_supports.json" : "u1_template.json");
++            boost::nowide::ifstream in(path_as_utf8(jp).c_str());
++            if (in) {
++                try {
++                    in >> cfg;
++                } catch (...) {}
++            }
+         }
++    } catch (...) {
++        cfg = json();
+     }
+     if (cfg.is_null() || cfg.empty()) {
+         cfg = json::object();
+@@ -265,6 +325,8 @@ std::string rewrite_model_settings(const std::string &xml, const std::map<std::s
+ 
+ void normalize_filament_arrays(json &cfg)
+ {
++    if (!cfg.is_object())
++        return;
+     const int n = BambuToU1Converter::k_target_filaments;
+     for (auto it = cfg.begin(); it != cfg.end(); ++it) {
+         if (!boost::algorithm::starts_with(it.key(), "filament_"))
+@@ -296,9 +358,9 @@ bool write_converted_zip(const boost::filesystem::path &src,
+     mz_zip_archive zout;
+     mz_zip_zero_struct(&zin);
+     mz_zip_zero_struct(&zout);
+-    if (!open_zip_reader(&zin, src.string()))
++    if (!open_zip_reader(&zin, path_as_utf8(src)))
+         return false;
+-    if (!open_zip_writer(&zout, dst.string())) {
++    if (!open_zip_writer(&zout, path_as_utf8(dst))) {
+         close_zip_reader(&zin);
+         return false;
+     }
+@@ -365,6 +427,8 @@ std::string make_minimal_bambu_3mf(const boost::filesystem::path &path, int n_fi
+     project["filament_colour"] = json::array();
+     project["filament_type"]   = json::array();
+     project["different_settings_to_system"] = json::array();
++    // Number, not string: nlohmann json::value("enable_support","0") used to throw type_error.
++    project["enable_support"] = with_support ? 1 : 0;
+     if (with_support)
+         project["different_settings_to_system"].push_back("enable_support");
+     std::ostringstream slice;
+@@ -386,7 +450,7 @@ std::string make_minimal_bambu_3mf(const boost::filesystem::path &path, int n_fi
+ 
+     mz_zip_archive zip;
+     mz_zip_zero_struct(&zip);
+-    if (!open_zip_writer(&zip, path.string()))
++    if (!open_zip_writer(&zip, path_as_utf8(path)))
+         return "open writer";
+     bool ok = mz_zip_writer_add_mem(&zip, "Metadata/slice_info.config", slice.str().data(), slice.str().size(), MZ_DEFAULT_COMPRESSION) &&
+               mz_zip_writer_add_mem(&zip, "Metadata/model_settings.config", model.data(), model.size(), MZ_DEFAULT_COMPRESSION) &&
+@@ -401,36 +465,50 @@ std::string make_minimal_bambu_3mf(const boost::filesystem::path &path, int n_fi
+ 
+ bool BambuToU1Converter::is_bambu_project(const boost::filesystem::path &src_3mf)
+ {
+-    mz_zip_archive zip;
+-    mz_zip_zero_struct(&zip);
+-    if (!open_zip_reader(&zip, src_3mf.string()))
++    try {
++        mz_zip_archive zip;
++        mz_zip_zero_struct(&zip);
++        if (!open_zip_reader(&zip, path_as_utf8(src_3mf)))
++            return false;
++        bool ok = zip_has(zip, "Metadata/project_settings.config");
++        close_zip_reader(&zip);
++        return ok;
++    } catch (...) {
+         return false;
+-    bool ok = zip_has(zip, "Metadata/project_settings.config");
+-    close_zip_reader(&zip);
+-    return ok;
++    }
+ }
+ 
+ std::vector<BambuToU1Converter::Filament> BambuToU1Converter::analyze(const boost::filesystem::path &src_3mf, std::string *error)
+ {
+-    mz_zip_archive zip;
+-    mz_zip_zero_struct(&zip);
+-    if (!open_zip_reader(&zip, src_3mf.string())) {
++    try {
++        mz_zip_archive zip;
++        mz_zip_zero_struct(&zip);
++        if (!open_zip_reader(&zip, path_as_utf8(src_3mf))) {
++            if (error)
++                *error = "Not a valid 3MF/ZIP archive.";
++            return {};
++        }
++        auto slice = read_zip_entry(zip, "Metadata/slice_info.config");
++        auto proj  = read_zip_entry(zip, "Metadata/project_settings.config");
++        close_zip_reader(&zip);
++        if (slice.empty() && proj.empty()) {
++            if (error)
++                *error = "Not a Bambu/MakerWorld project 3MF (missing Metadata). STL and Printables geometry 3MF cannot be converted.";
++            return {};
++        }
++        auto fils = parse_filaments_from_contents(slice, proj);
++        if (fils.empty() && error)
++            *error = "Could not parse filaments from the uploaded file.";
++        return fils;
++    } catch (const std::exception &e) {
+         if (error)
+-            *error = "Not a valid 3MF/ZIP archive.";
++            *error = std::string("Could not read the 3MF: ") + e.what();
+         return {};
+-    }
+-    auto slice = read_zip_entry(zip, "Metadata/slice_info.config");
+-    auto proj  = read_zip_entry(zip, "Metadata/project_settings.config");
+-    close_zip_reader(&zip);
+-    if (slice.empty() && proj.empty()) {
++    } catch (...) {
+         if (error)
+-            *error = "Not a Bambu/MakerWorld project 3MF (missing Metadata). STL and Printables geometry 3MF cannot be converted.";
++            *error = "Could not read the 3MF (unknown error).";
+         return {};
+     }
+-    auto fils = parse_filaments_from_contents(slice, proj);
+-    if (fils.empty() && error)
+-        *error = "Could not parse filaments from the uploaded file.";
+-    return fils;
+ }
+ 
+ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::path &src_3mf,
+@@ -438,6 +516,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
+                                                        const std::vector<Pick>       &keep_picks)
+ {
+     Result r;
++    try {
+     std::string err;
+     auto filaments = analyze(src_3mf, &err);
+     r.filaments    = filaments;
+@@ -466,7 +545,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
+ 
+     mz_zip_archive zip;
+     mz_zip_zero_struct(&zip);
+-    if (!open_zip_reader(&zip, src_3mf.string())) {
++    if (!open_zip_reader(&zip, path_as_utf8(src_3mf))) {
+         r.error = "Not a valid 3MF/ZIP archive.";
+         return r;
+     }
+@@ -486,14 +565,14 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
+     }
+ 
+     bool has_support = false;
+-    auto diff        = orig_settings.value("different_settings_to_system", json::array());
++    auto diff        = json_as_array(orig_settings, "different_settings_to_system");
+     if (diff.is_array()) {
+         for (const auto &s : diff) {
+             if (s.is_string() && s.get<std::string>().find("enable_support") != std::string::npos)
+                 has_support = true;
+         }
+     }
+-    if (orig_settings.value("enable_support", "0") == "1" || orig_settings.value("enable_support", 0) == 1)
++    if (json_truthy(orig_settings, "enable_support"))
+         has_support = true;
+ 
+     json combined = load_u1_template(has_support);
+@@ -539,7 +618,7 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
+ 
+     boost::system::error_code ec;
+     boost::filesystem::create_directories(dest_dir, ec);
+-    std::string stem = src_3mf.stem().string();
++    std::string stem = path_as_utf8(src_3mf.stem());
+     boost::replace_all(stem, "-U1", "");
+     auto dest = dest_dir / (sanitize_model_filename(stem) + "-U1.3mf");
+     if (!write_converted_zip(src_3mf, dest, new_slice, new_model, new_proj)) {
+@@ -547,13 +626,26 @@ BambuToU1Converter::Result BambuToU1Converter::convert(const boost::filesystem::
+         return r;
+     }
+     r.ok          = true;
+-    r.output_path = dest.string();
+-    BOOST_LOG_TRIVIAL(info) << "BambuToU1: wrote " << r.output_path << " supports=" << has_support;
++    r.output_path = path_as_utf8(dest);
++    BOOST_LOG_TRIVIAL(info) << "BambuToU1: wrote " << r.output_path << " supports=" << has_support
++                           << " template=" << (has_support ? "supports" : "plain");
+     return r;
++    } catch (const std::exception &e) {
++        BOOST_LOG_TRIVIAL(error) << "BambuToU1: convert exception: " << e.what();
++        r.ok    = false;
++        r.error = std::string("Conversion failed: ") + e.what();
++        return r;
++    } catch (...) {
++        BOOST_LOG_TRIVIAL(error) << "BambuToU1: convert unknown exception";
++        r.ok    = false;
++        r.error = "Conversion failed (unknown error). Try File → Convert Bambu 3MF to U1 with a project .3mf.";
++        return r;
++    }
+ }
+ 
+ bool BambuToU1Converter::smoke_test(std::string &error)
+ {
++    try {
+     auto tmp = boost::filesystem::temp_directory_path() / "orcaunificado-u1-smoke";
+     boost::system::error_code ec;
+     boost::filesystem::create_directories(tmp, ec);
+@@ -579,7 +671,7 @@ bool BambuToU1Converter::smoke_test(std::string &error)
+         return false;
+     }
+     {
+-        boost::nowide::ofstream o(stl.string().c_str());
++        boost::nowide::ofstream o(path_as_utf8(stl).c_str());
+         o << "solid nope\nendsolid nope\n";
+     }
+     if (is_bambu_project(stl)) {
+@@ -624,6 +716,13 @@ bool BambuToU1Converter::smoke_test(std::string &error)
+         return false;
+     }
+     return true;
++    } catch (const std::exception &e) {
++        error = std::string("smoke_test exception: ") + e.what();
++        return false;
++    } catch (...) {
++        error = "smoke_test unknown exception";
++        return false;
++    }
+ }
+ 
+ } // namespace Slic3r
+diff --git a/src/slic3r/Utils/ModelsPaths.cpp b/src/slic3r/Utils/ModelsPaths.cpp
+index 9de83f3..6a30e7f 100644
+--- a/src/slic3r/Utils/ModelsPaths.cpp
++++ b/src/slic3r/Utils/ModelsPaths.cpp
+@@ -5,6 +5,8 @@
+ #include <boost/algorithm/string.hpp>
+ #include <boost/filesystem.hpp>
+ #include <boost/log/trivial.hpp>
++#include <ctime>
++#include <boost/nowide/convert.hpp>
+ #include <boost/nowide/fstream.hpp>
+ 
+ #ifdef _WIN32
+@@ -130,4 +132,41 @@ std::string sanitize_model_filename(const std::string &name)
+     return out;
+ }
+ 
++std::string path_as_utf8(const boost::filesystem::path &p)
++{
++#ifdef _WIN32
++    return boost::nowide::narrow(p.wstring());
++#else
++    return p.string();
++#endif
++}
++
++boost::filesystem::path newest_model_file(const boost::filesystem::path &root)
++{
++    namespace fs = boost::filesystem;
++    boost::system::error_code ec;
++    if (!fs::exists(root, ec))
++        return {};
++    fs::path best;
++    std::time_t best_t = 0;
++    auto consider = [&](const fs::path &p) {
++        auto ext = p.extension().string();
++        boost::to_lower(ext);
++        if (ext != ".3mf" && ext != ".stl" && ext != ".zip" && ext != ".obj")
++            return;
++        std::time_t t = fs::last_write_time(p, ec);
++        if (ec)
++            return;
++        if (best.empty() || t >= best_t) {
++            best   = p;
++            best_t = t;
++        }
++    };
++    for (fs::recursive_directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
++        if (fs::is_regular_file(it->path(), ec))
++            consider(it->path());
++    }
++    return best;
++}
++
+ } // namespace Slic3r
+diff --git a/src/slic3r/Utils/ModelsPaths.hpp b/src/slic3r/Utils/ModelsPaths.hpp
+index e4bde7f..6850971 100644
+--- a/src/slic3r/Utils/ModelsPaths.hpp
++++ b/src/slic3r/Utils/ModelsPaths.hpp
+@@ -24,6 +24,12 @@ boost::filesystem::path exe_dir();
+ // Distinct from Slic3r::sanitize_filename in libslic3r/Utils.hpp (inline).
+ std::string sanitize_model_filename(const std::string &name);
+ 
++// UTF-8 for boost::nowide / miniz. On Windows path.string() is ACP, not UTF-8.
++std::string path_as_utf8(const boost::filesystem::path &p);
++
++// Newest .3mf/.stl/.zip/.obj under root (non-recursive one level + one extra). Empty if none.
++boost::filesystem::path newest_model_file(const boost::filesystem::path &root);
++
+ } // namespace Slic3r
+ 
+ #endif

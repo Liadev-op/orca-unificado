@@ -1,0 +1,42 @@
+[
+  {
+    "type": "ABS",
+    "settings_id": "Snapmaker ABS @U1 0.4 nozzle"
+  },
+  {
+    "type": "PETG-HF",
+    "settings_id": "Snapmaker PETG HF"
+  },
+  {
+    "type": "PLA",
+    "settings_id": "Snapmaker PLA SnapSpeed @U1"
+  },
+  {
+    "type": "TPU",
+    "settings_id": "Snapmaker TPU @U1 0.4 nozzle"
+  },
+  {
+    "type": "PETG",
+    "settings_id": "Snapmaker PETG HF"
+  },
+  {
+    "type": "ASA",
+    "settings_id": "Snapmaker ASA @U1 0.4 nozzle"
+  },
+  {
+    "type": "PVA",
+    "settings_id": "Snapmaker PVA @U1"
+  },
+  {
+    "type": "PETG-CF",
+    "settings_id": "Snapmaker PETG-CF @U1 0.4 nozzle"
+  },
+  {
+    "type": "PLA-CF",
+    "settings_id": "Snapmaker PLA-CF @U1 0.4 nozzle"
+  },
+  {
+    "type": "PC",
+    "settings_id": "Generic PC"
+  }
+]

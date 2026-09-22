@@ -1,0 +1,31 @@
+name: Dispatch M2 Windows build
+
+# One-shot: workflow_dispatch windows-build.yml on the M2 branch so the
+# zip lands on prerelease tag m2-windows (does not overwrite m1-windows).
+# This branch is NOT added to windows-build.yml on.push.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/dispatch-m2-windows.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch Windows portable build (m2-windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-build.yml --ref cursor/m2-models-webview-59e1
+          sleep 10
+          gh run list --workflow=windows-build.yml --branch cursor/m2-models-webview-59e1 --limit 5
+          gh run list --workflow=windows-build.yml --limit 5

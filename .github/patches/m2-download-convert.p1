@@ -1,0 +1,360 @@
+ }
+ 
+ void WebModelsPanel::OpenInPrepare(const std::string &path, bool as_project)
+@@ -481,20 +556,25 @@ void WebModelsPanel::OpenInPrepare(const std::string &path, bool as_project)
+ 
+ void WebModelsPanel::OnOpenPrepare()
+ {
+-    if (!m_last_converted.empty()) {
+-        OpenInPrepare(m_last_converted, true);
+-        return;
+-    }
+-    if (m_last_file.empty())
+-        return;
+-    bool bambu = boost::algorithm::iends_with(m_last_file, ".3mf") && BambuToU1Converter::is_bambu_project(m_last_file);
+-    if (bambu && m_chk_convert->GetValue()) {
+-        if (ConvertPath(m_last_file, &m_last_converted) && !m_last_converted.empty()) {
++    try {
++        if (!m_last_converted.empty()) {
+             OpenInPrepare(m_last_converted, true);
+             return;
+         }
++        if (m_last_file.empty())
++            return;
++        bool bambu = boost::algorithm::iends_with(m_last_file, ".3mf") &&
++                     BambuToU1Converter::is_bambu_project(boost::filesystem::path(m_last_file));
++        if (bambu && m_chk_convert->GetValue()) {
++            if (ConvertPath(m_last_file, &m_last_converted) && !m_last_converted.empty()) {
++                OpenInPrepare(m_last_converted, true);
++                return;
++            }
++        }
++        OpenInPrepare(m_last_file, false);
++    } catch (...) {
++        ErrorDialog(this, _L("Open in Prepare failed. The app stayed open."), false).ShowModal();
+     }
+-    OpenInPrepare(m_last_file, false);
+ }
+ 
+ void WebModelsPanel::msw_rescale()
+diff --git a/src/slic3r/GUI/WebView2Host.cpp b/src/slic3r/GUI/WebView2Host.cpp
+index a7ffe0e..d59e138 100644
+--- a/src/slic3r/GUI/WebView2Host.cpp
++++ b/src/slic3r/GUI/WebView2Host.cpp
+@@ -6,8 +6,10 @@
+ 
+ #include <boost/log/trivial.hpp>
+ #include <boost/nowide/convert.hpp>
++#include <exception>
+ #include <iomanip>
+ 
++#include <wx/filename.h>
+ #include <wx/sizer.h>
+ #include <wx/stattext.h>
+ #include <wx/webview.h>
+@@ -128,6 +130,34 @@ void WebView2Host::ResizeNative()
+ #endif
+ }
+ 
++void WebView2Host::SetDefaultDownloadFolder(const wxString &folder)
++{
++    m_default_dl_folder = folder;
++#ifdef _WIN32
++    ApplyDefaultDownloadFolder();
++#endif
++}
++
++#ifdef _WIN32
++void WebView2Host::ApplyDefaultDownloadFolder()
++{
++    if (m_default_dl_folder.empty() || !m_native || !m_native->webview)
++        return;
++    try {
++        ComPtr<ICoreWebView2_13> wv13;
++        if (FAILED(m_native->webview.As(&wv13)) || !wv13)
++            return;
++        ComPtr<ICoreWebView2Profile> profile;
++        if (FAILED(wv13->get_Profile(&profile)) || !profile)
++            return;
++        HRESULT hr = profile->put_DefaultDownloadFolderPath(m_default_dl_folder.wc_str());
++        BOOST_LOG_TRIVIAL(info) << "Models WebView2 DefaultDownloadFolderPath hr=" << std::hex << hr;
++    } catch (...) {
++        BOOST_LOG_TRIVIAL(error) << "Models WebView2: DefaultDownloadFolderPath threw";
++    }
++}
++#endif
++
+ void WebView2Host::Navigate(const wxString &url)
+ {
+     m_pending_url = url;
+@@ -265,37 +295,56 @@ void WebView2Host::StartWebView2()
+                             }
+ 
+                             m_native->webview.As(&m_native->webview4);
++                            ApplyDefaultDownloadFolder();
+                             if (m_native->webview4) {
+                                 m_native->webview4->add_DownloadStarting(
+                                     Callback<ICoreWebView2DownloadStartingEventHandler>(
+                                         [this](ICoreWebView2 *, ICoreWebView2DownloadStartingEventArgs *args) -> HRESULT {
++                                            try {
+                                             if (!m_native || m_native->dying || !args)
+                                                 return S_OK;
+                                             ICoreWebView2DownloadOperation *op = nullptr;
+                                             args->get_DownloadOperation(&op);
+                                             LPWSTR uri = nullptr;
+                                             LPWSTR sug = nullptr;
++                                            LPWSTR args_path = nullptr;
+                                             if (op) {
+                                                 op->get_Uri(&uri);
+                                                 op->get_ResultFilePath(&sug);
+                                             }
++                                            args->get_ResultFilePath(&args_path);
+                                             wxString uri_s = lpwstr_to_wx(uri);
+                                             wxString sug_s = lpwstr_to_wx(sug);
++                                            if (sug_s.empty())
++                                                sug_s = lpwstr_to_wx(args_path);
+                                             free_co_str(uri);
+                                             free_co_str(sug);
++                                            free_co_str(args_path);
+ 
+                                             wxString dest = m_next_download;
+                                             m_next_download.clear();
+-                                            if (dest.empty() && m_suggest)
+-                                                dest = m_suggest(uri_s, sug_s);
++                                            if (dest.empty() && m_suggest) {
++                                                try {
++                                                    dest = m_suggest(uri_s, sug_s);
++                                                } catch (const std::exception &e) {
++                                                    BOOST_LOG_TRIVIAL(error) << "Models suggest path: " << e.what();
++                                                } catch (...) {}
++                                            }
++                                            if (dest.empty() && !m_default_dl_folder.empty() && !sug_s.empty()) {
++                                                wxFileName fn(sug_s);
++                                                dest = m_default_dl_folder + wxFileName::GetPathSeparator() + fn.GetFullName();
++                                            }
+                                             if (!dest.empty()) {
++                                                // Handled + absolute path: skip the Edge save dialog and land in models/.
+                                                 args->put_ResultFilePath(dest.wc_str());
+                                                 args->put_Handled(TRUE);
++                                                BOOST_LOG_TRIVIAL(info) << "Models DownloadStarting dest=" << dest.ToUTF8().data();
+                                             }
+                                             if (op) {
+                                                 op->add_StateChanged(
+                                                     Callback<ICoreWebView2StateChangedEventHandler>(
+                                                         [this, dest](ICoreWebView2DownloadOperation *sender, IUnknown *) -> HRESULT {
++                                                            try {
+                                                             if (!m_native || m_native->dying || !sender)
+                                                                 return S_OK;
+                                                             COREWEBVIEW2_DOWNLOAD_STATE st;
+@@ -317,12 +366,18 @@ void WebView2Host::StartWebView2()
+                                                                 ev.SetString(_L("Download interrupted (login, paywall or network)."));
+                                                                 wxPostEvent(this, ev);
+                                                             }
++                                                            } catch (...) {
++                                                                BOOST_LOG_TRIVIAL(error) << "Models WebView2 StateChanged threw";
++                                                            }
+                                                             return S_OK;
+                                                         })
+                                                         .Get(),
+                                                     nullptr);
+                                                 op->Release();
+                                             }
++                                            } catch (...) {
++                                                BOOST_LOG_TRIVIAL(error) << "Models WebView2 DownloadStarting threw";
++                                            }
+                                             return S_OK;
+                                         })
+                                         .Get(),
+@@ -332,6 +387,7 @@ void WebView2Host::StartWebView2()
+                             m_native->webview->add_NavigationCompleted(
+                                 Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                     [this](ICoreWebView2 *sender, ICoreWebView2NavigationCompletedEventArgs *args) -> HRESULT {
++                                        try {
+                                         if (!m_native || m_native->dying || !sender)
+                                             return S_OK;
+                                         LPWSTR uri = nullptr;
+@@ -351,6 +407,9 @@ void WebView2Host::StartWebView2()
+                                         ev.SetString(m_current_url);
+                                         ev.SetInt(ok ? 1 : 0);
+                                         wxPostEvent(this, ev);
++                                        } catch (...) {
++                                            BOOST_LOG_TRIVIAL(error) << "Models WebView2 NavigationCompleted threw";
++                                        }
+                                         return S_OK;
+                                     })
+                                     .Get(),
+@@ -359,15 +418,24 @@ void WebView2Host::StartWebView2()
+                             m_native->webview->add_NewWindowRequested(
+                                 Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+                                     [this](ICoreWebView2 *, ICoreWebView2NewWindowRequestedEventArgs *args) -> HRESULT {
++                                        try {
+                                         if (!args || !m_native || !m_native->webview)
+                                             return S_OK;
+                                         LPWSTR uri = nullptr;
+                                         args->get_Uri(&uri);
+                                         wxString u = lpwstr_to_wx(uri);
+                                         free_co_str(uri);
++                                        // Official WebView2 pattern: same CoreWebView2 as the new window.
++                                        // Handled+Navigate(about:blank) drops MakerWorld window.open / blob downloads.
++                                        HRESULT hr = args->put_NewWindow(m_native->webview.Get());
+                                         args->put_Handled(TRUE);
+-                                        if (!u.empty())
++                                        if (FAILED(hr) && !u.empty() && !u.StartsWith("about:") && !u.StartsWith("blob:"))
+                                             m_native->webview->Navigate(u.wc_str());
++                                        BOOST_LOG_TRIVIAL(info) << "Models NewWindowRequested uri=" << u.ToUTF8().data()
++                                                                << " put_NewWindow hr=" << std::hex << hr;
++                                        } catch (...) {
++                                            BOOST_LOG_TRIVIAL(error) << "Models WebView2 NewWindowRequested threw";
++                                        }
+                                         return S_OK;
+                                     })
+                                     .Get(),
+diff --git a/src/slic3r/GUI/WebView2Host.hpp b/src/slic3r/GUI/WebView2Host.hpp
+index 1ed57fb..5ca79ee 100644
+--- a/src/slic3r/GUI/WebView2Host.hpp
++++ b/src/slic3r/GUI/WebView2Host.hpp
+@@ -32,8 +32,12 @@ public:
+     wxString    CurrentUrl() const;
+     bool        IsReady() const { return m_ready; }
+ 
+-    // Next DownloadStarting is forced into this full path (UTF-8). Empty = derive from suggested name.
+-    void        SetNextDownloadPath(const wxString &path_utf8) { m_next_download = path_utf8; }
++    // Next DownloadStarting is forced into this full path. Empty = derive from suggested name.
++    void        SetNextDownloadPath(const wxString &path) { m_next_download = path; }
++
++    // WebView2 profile default folder (models/<provider>/). Wide path on Windows.
++    void        SetDefaultDownloadFolder(const wxString &folder);
++    wxString    DefaultDownloadFolder() const { return m_default_dl_folder; }
+ 
+     using SuggestFn = std::function<wxString(const wxString &uri, const wxString &suggested)>;
+     void        SetDownloadPathSuggester(SuggestFn fn) { m_suggest = std::move(fn); }
+@@ -49,6 +53,7 @@ private:
+     wxString  m_pending_url;
+     wxString  m_current_url;
+     wxString  m_next_download;
++    wxString  m_default_dl_folder;
+     SuggestFn m_suggest;
+     bool      m_ready{false};
+     bool      m_can_back{false};
+@@ -56,6 +61,7 @@ private:
+ 
+ #ifdef _WIN32
+     void       StartWebView2();
++    void       ApplyDefaultDownloadFolder();
+     struct Native;
+     Native    *m_native{nullptr};
+ #else
+diff --git a/src/slic3r/Utils/BambuToU1Converter.cpp b/src/slic3r/Utils/BambuToU1Converter.cpp
+index ad34ca7..dc15e2d 100644
+--- a/src/slic3r/Utils/BambuToU1Converter.cpp
++++ b/src/slic3r/Utils/BambuToU1Converter.cpp
+@@ -15,6 +15,7 @@
+ #include <map>
+ #include <regex>
+ #include <sstream>
++#include <stdexcept>
+ 
+ using json = nlohmann::json;
+ 
+@@ -24,6 +25,57 @@ namespace {
+ 
+ constexpr const char *k_default_profile = "Snapmaker PLA SnapSpeed @U1";
+ 
++std::string json_as_string(const json &j, const char *key, const std::string &def = {})
++{
++    if (!j.is_object() || !j.contains(key))
++        return def;
++    const auto &v = j.at(key);
++    try {
++        if (v.is_string())
++            return v.get<std::string>();
++        if (v.is_boolean())
++            return v.get<bool>() ? "1" : "0";
++        if (v.is_number_integer())
++            return std::to_string(v.get<long long>());
++        if (v.is_number())
++            return std::to_string(v.get<double>());
++    } catch (...) {}
++    return def;
++}
++
++bool json_truthy(const json &j, const char *key)
++{
++    if (!j.is_object() || !j.contains(key))
++        return false;
++    const auto &v = j.at(key);
++    try {
++        if (v.is_string()) {
++            const auto s = v.get<std::string>();
++            return s == "1" || s == "true" || s == "True" || s == "TRUE";
++        }
++        if (v.is_boolean())
++            return v.get<bool>();
++        if (v.is_number())
++            return v.get<double>() != 0.0;
++    } catch (...) {}
++    return false;
++}
++
++json json_as_array(const json &j, const char *key)
++{
++    if (!j.is_object() || !j.contains(key))
++        return json::array();
++    const auto &v = j.at(key);
++    if (v.is_array())
++        return v;
++    if (v.is_string()) {
++        json arr = json::array();
++        arr.push_back(v.get<std::string>());
++        return arr;
++    }
++    return json::array();
++}
++
+ std::string read_zip_entry(mz_zip_archive &zip, const char *name)
+ {
+     int idx = mz_zip_reader_locate_file(&zip, name, nullptr, 0);
+@@ -64,7 +116,7 @@ json load_filament_map()
+ {
+     json arr = json::array();
+     auto p   = converter_resources_dir() / "u1_filament_map.json";
+-    boost::nowide::ifstream in(p.string().c_str());
++    boost::nowide::ifstream in(path_as_utf8(p).c_str());
+     if (in) {
+         try {
+             in >> arr;
+@@ -86,9 +138,13 @@ json load_filament_map()
+ 
+ std::string profile_for_type(const json &map, const std::string &type)
+ {
++    if (!map.is_array())
++        return k_default_profile;
+     for (const auto &it : map) {
+-        if (it.value("type", "") == type)
+-            return it.value("settings_id", k_default_profile);
++        if (json_as_string(it, "type") == type) {
++            auto sid = json_as_string(it, "settings_id", k_default_profile);
++            return sid.empty() ? k_default_profile : sid;
++        }
+     }
+     return k_default_profile;
+ }
+@@ -127,8 +183,8 @@ std::vector<BambuToU1Converter::Filament> parse_filaments_from_contents(const st
+         return filaments;
+     try {
+         json cfg = json::parse(project_settings);
+-        auto colors = cfg.value("filament_colour", json::array());
+-        auto types  = cfg.value("filament_type", json::array());
++        auto colors = json_as_array(cfg, "filament_colour");
++        auto types  = json_as_array(cfg, "filament_type");
+         for (size_t i = 0; i < colors.size(); ++i) {
+             BambuToU1Converter::Filament f;
+             f.id    = std::to_string(i + 1);
+@@ -142,28 +198,32 @@ std::vector<BambuToU1Converter::Filament> parse_filaments_from_contents(const st
+ 
+ json load_u1_template(bool supports)
+ {
+-    const char *name = supports ? "u1_template_supports.3mf" : "u1_template.3mf";
+-    auto        p    = converter_resources_dir() / name;
+-    mz_zip_archive zip;
+-    mz_zip_zero_struct(&zip);

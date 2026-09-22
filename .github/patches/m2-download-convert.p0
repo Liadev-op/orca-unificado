@@ -1,0 +1,360 @@
+diff --git a/src/slic3r/GUI/MainFrame.cpp b/src/slic3r/GUI/MainFrame.cpp
+index 3633a06..8593009 100644
+--- a/src/slic3r/GUI/MainFrame.cpp
++++ b/src/slic3r/GUI/MainFrame.cpp
+@@ -2654,8 +2654,12 @@ void MainFrame::init_menubar_as_editor()
+         append_menu_item(fileMenu, wxID_ANY, _L("Convert Bambu 3MF to U1") + dots,
+             _L("Rewrite a MakerWorld/Bambu project as a Snapmaker U1 3MF, keeping color painting. Runs locally; does not call bl2u1.nbn.cat."),
+             [this](wxCommandEvent &) {
+-                if (m_models_panel)
+-                    m_models_panel->convert_file_dialog();
++                try {
++                    if (m_models_panel)
++                        m_models_panel->convert_file_dialog();
++                } catch (...) {
++                    wxMessageBox(_L("Convert to U1 failed. The app stayed open."), _L("Orca Unificado"), wxOK | wxICON_ERROR);
++                }
+             },
+             "", nullptr, []() { return true; }, this);
+ 
+diff --git a/src/slic3r/GUI/WebModelsPanel.cpp b/src/slic3r/GUI/WebModelsPanel.cpp
+index 8defe3d..f226cde 100644
+--- a/src/slic3r/GUI/WebModelsPanel.cpp
++++ b/src/slic3r/GUI/WebModelsPanel.cpp
+@@ -21,6 +21,7 @@
+ #include <boost/filesystem.hpp>
+ #include <boost/log/trivial.hpp>
+ #include <boost/nowide/convert.hpp>
++#include <exception>
+ 
+ #include <wx/checkbox.h>
+ #include <wx/filedlg.h>
+@@ -108,7 +109,7 @@ void WebModelsPanel::BuildUi()
+     m_local_list = new wxListBox(m_local_panel, wxID_ANY);
+     ls->Add(m_local_list, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
+     m_local_list->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &e) {
+-        m_last_file = e.GetString().ToUTF8().data();
++        m_last_file = into_u8(e.GetString());
+         m_last_converted.clear();
+         UpdateChrome();
+     });
+@@ -181,11 +182,12 @@ void WebModelsPanel::EnsureProviderHost(const std::string &id)
+         "OrcaUnificado/%s (%s) Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+         SLIC3R_VERSION, prov->user_agent_tag());
+-    auto *host = new WebView2Host(m_browser_stack, wxString::FromUTF8(profile.string()), ua);
++    auto *host = new WebView2Host(m_browser_stack, from_path(profile), ua);
+     m_hosts[id] = host;
+     m_stack_sizer->Add(host, 1, wxEXPAND);
+     host->Hide();
+ 
++    host->SetDefaultDownloadFolder(from_path(models_provider_dir(id, true)));
+     host->SetDownloadPathSuggester([this, id](const wxString &uri, const wxString &suggested) {
+         return SuggestDownloadPath(id, uri, suggested);
+     });
+@@ -255,7 +257,7 @@ void WebModelsPanel::RefreshLocalList()
+             auto ext = it->path().extension().string();
+             boost::to_lower(ext);
+             if (ext == ".3mf" || ext == ".stl" || ext == ".zip" || ext == ".obj")
+-                m_local_list->Append(wxString::FromUTF8(it->path().string()));
++                m_local_list->Append(from_path(it->path()));
+         }
+     };
+     add_dir(models_root_dir(true));
+@@ -273,11 +275,11 @@ void WebModelsPanel::UpdateChrome()
+     if (web)
+         m_url->SetValue(host->CurrentUrl());
+     else if (m_current_id == "local")
+-        m_url->SetValue(wxString::FromUTF8(models_root_dir(false).string()));
++        m_url->SetValue(from_path(models_root_dir(false)));
+ 
+     bool is_mw = m_current_id == "makerworld";
+     m_chk_convert->Enable(is_mw || (!m_last_file.empty() && boost::algorithm::iends_with(m_last_file, ".3mf")));
+-    m_btn_convert->Enable(!m_last_file.empty() && boost::algorithm::iends_with(m_last_file, ".3mf"));
++    m_btn_convert->Enable(true);
+     m_btn_open->Enable(!m_last_file.empty() || !m_last_converted.empty());
+ 
+     wxString sess;
+@@ -288,7 +290,9 @@ void WebModelsPanel::UpdateChrome()
+     else
+         sess = _L("Local library next to the exe (models/).");
+     if (!m_last_file.empty())
+-        sess += "  " + wxString::Format(_L("Last file: %s"), wxString::FromUTF8(boost::filesystem::path(m_last_file).filename().string()));
++        sess += "  " + wxString::Format(_L("Last file: %s"), from_path(boost::filesystem::path(m_last_file).filename()));
++    else
++        sess += "  " + wxString::Format(_L("Site Download STL/CAD saves into %s"), from_path(models_provider_dir(m_current_id == "local" ? "makerworld" : m_current_id, false)));
+     m_status->SetLabel(sess);
+ }
+ 
+@@ -308,67 +312,114 @@ void WebModelsPanel::OnForward()
+ 
+ wxString WebModelsPanel::SuggestDownloadPath(const std::string &provider_id, const wxString &uri, const wxString &suggested)
+ {
+-    ModelProvider *prov = nullptr;
+-    for (auto &p : m_providers) {
+-        if (p->id() == provider_id)
+-            prov = p.get();
+-    }
+-    if (!prov)
++    try {
++        ModelProvider *prov = nullptr;
++        for (auto &p : m_providers) {
++            if (p->id() == provider_id)
++                prov = p.get();
++        }
++        if (!prov)
++            return {};
++        std::string page = m_hosts.count(provider_id) ? into_u8(m_hosts[provider_id]->CurrentUrl()) : "";
++        auto        sub  = prov->download_subfolder(page, into_u8(uri));
++        auto        dir  = models_provider_dir(provider_id, true) / sub;
++        boost::system::error_code ec;
++        boost::filesystem::create_directories(dir, ec);
++        wxFileName fn(suggested);
++        std::string name = sanitize_model_filename(into_u8(fn.GetFullName()));
++        if (name.empty() || name == "model") {
++            wxFileName fu(uri);
++            name = sanitize_model_filename(into_u8(fu.GetFullName()));
++        }
++        if (name.empty() || name.find('.') == std::string::npos)
++            name = "model.3mf";
++        // from_path uses wchar on Windows — FromUTF8(path.string()) was ACP and the file never landed.
++        return from_path(dir / name);
++    } catch (const std::exception &e) {
++        BOOST_LOG_TRIVIAL(error) << "Models SuggestDownloadPath: " << e.what();
++        return {};
++    } catch (...) {
+         return {};
+-    std::string page = m_hosts.count(provider_id) ? m_hosts[provider_id]->CurrentUrl().ToUTF8().data() : "";
+-    auto        sub  = prov->download_subfolder(page, uri.ToUTF8().data());
+-    auto        dir  = models_provider_dir(provider_id, true) / sub;
+-    boost::system::error_code ec;
+-    boost::filesystem::create_directories(dir, ec);
+-    wxFileName fn(suggested);
+-    std::string name = sanitize_model_filename(fn.GetFullName().ToUTF8().data());
+-    if (name.empty() || name == "model") {
+-        wxFileName fu(uri);
+-        name = sanitize_model_filename(fu.GetFullName().ToUTF8().data());
+     }
+-    if (name.empty() || name.find('.') == std::string::npos)
+-        name = "model.3mf";
+-    return wxString::FromUTF8((dir / name).string());
+ }
+ 
+ void WebModelsPanel::OnDownloadFinished(const std::string &provider_id, const wxString &path)
+ {
+-    m_last_file      = path.ToUTF8().data();
+-    m_last_converted.clear();
+-    m_status->SetLabel(wxString::Format(_L("Saved to %s"), path));
+-    BOOST_LOG_TRIVIAL(info) << "Models download: " << m_last_file << " provider=" << provider_id;
+-    bool do_convert = m_chk_convert->GetValue();
+-    ModelProvider *prov = nullptr;
+-    for (auto &p : m_providers)
+-        if (p->id() == provider_id)
+-            prov = p.get();
+-    if (do_convert && prov && prov->offers_u1_convert() && boost::algorithm::iends_with(m_last_file, ".3mf") &&
+-        BambuToU1Converter::is_bambu_project(m_last_file)) {
+-        std::string converted;
+-        if (ConvertPath(m_last_file, &converted))
+-            m_last_converted = converted;
++    try {
++        boost::system::error_code ec;
++        auto p = into_path(path);
++        if (!boost::filesystem::exists(p, ec) || !boost::filesystem::is_regular_file(p, ec)) {
++            auto scanned = newest_model_file(models_provider_dir(provider_id, false));
++            if (!scanned.empty() && boost::filesystem::exists(scanned, ec)) {
++                BOOST_LOG_TRIVIAL(warning) << "Models download path missing, using newest " << path_as_utf8(scanned);
++                p = scanned;
++            }
++        }
++        if (!boost::filesystem::exists(p, ec) || !boost::filesystem::is_regular_file(p, ec)) {
++            m_status->SetLabel(_L("Download reported a name but the file is not under models/. Use the site Download again, or Save to portable."));
++            WarningDialog(this,
++                          wxString::Format(_L("WebView2 finished a download named %s but the file is not on disk under models/. Click MakerWorld “Download STL/CAD” again. Files should land in:\n%s"),
++                                           path, from_path(models_provider_dir(provider_id, false))),
++                          _L("Models"), wxOK)
++                .ShowModal();
++            UpdateChrome();
++            return;
++        }
++        m_last_file = path_as_utf8(p);
++        m_last_converted.clear();
++        m_status->SetLabel(wxString::Format(_L("Saved to %s"), from_path(p)));
++        BOOST_LOG_TRIVIAL(info) << "Models download: " << m_last_file << " provider=" << provider_id;
++        bool do_convert = m_chk_convert->GetValue();
++        ModelProvider *prov = nullptr;
++        for (auto &pprov : m_providers)
++            if (pprov->id() == provider_id)
++                prov = pprov.get();
++        if (do_convert && prov && prov->offers_u1_convert() && boost::algorithm::iends_with(m_last_file, ".3mf") &&
++            BambuToU1Converter::is_bambu_project(p)) {
++            std::string converted;
++            if (ConvertPath(m_last_file, &converted))
++                m_last_converted = converted;
++        }
++    } catch (const std::exception &e) {
++        BOOST_LOG_TRIVIAL(error) << "Models OnDownloadFinished: " << e.what();
++        m_status->SetLabel(_L("Download handler failed. The app stayed open."));
++    } catch (...) {
++        BOOST_LOG_TRIVIAL(error) << "Models OnDownloadFinished: unknown";
++        m_status->SetLabel(_L("Download handler failed. The app stayed open."));
+     }
+     UpdateChrome();
+ }
+ 
+ void WebModelsPanel::OnDownloadManual()
+ {
+-    wxFileDialog dlg(this, _L("Copy a downloaded model into the portable models folder"), wxEmptyString, wxEmptyString,
+-                     "3MF/STL (*.3mf;*.stl;*.zip)|*.3mf;*.stl;*.zip", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+-    if (dlg.ShowModal() != wxID_OK)
+-        return;
+-    auto src = into_path(dlg.GetPath());
+-    auto id  = m_current_id == "local" ? std::string("makerworld") : m_current_id;
+-    auto dest_dir = models_provider_dir(id, true) / "manual";
+-    boost::system::error_code ec;
+-    boost::filesystem::create_directories(dest_dir, ec);
+-    auto dest = dest_dir / src.filename();
+-    boost::filesystem::copy_file(src, dest, boost::filesystem::copy_options::overwrite_existing, ec);
+-    if (ec) {
+-        ErrorDialog(this, wxString::FromUTF8(ec.message()), false).ShowModal();
+-        return;
++    try {
++        auto id = m_current_id == "local" ? std::string("makerworld") : m_current_id;
++        auto start = models_provider_dir(id, true);
++        wxFileDialog dlg(this, _L("Copy a downloaded model into the portable models folder"),
++                         from_path(start), wxEmptyString,
++                         "3MF/STL (*.3mf;*.stl;*.zip)|*.3mf;*.stl;*.zip", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
++        if (dlg.ShowModal() != wxID_OK)
++            return;
++        auto src = into_path(dlg.GetPath());
++        auto dest_dir = models_provider_dir(id, true) / "manual";
++        boost::system::error_code ec;
++        boost::filesystem::create_directories(dest_dir, ec);
++        auto dest = dest_dir / src.filename();
++        if (boost::filesystem::equivalent(src, dest, ec)) {
++            OnDownloadFinished(id, from_path(dest));
++            return;
++        }
++        boost::filesystem::copy_file(src, dest, boost::filesystem::copy_options::overwrite_existing, ec);
++        if (ec) {
++            ErrorDialog(this, wxString::FromUTF8(ec.message()), false).ShowModal();
++            return;
++        }
++        OnDownloadFinished(id, from_path(dest));
++    } catch (const std::exception &e) {
++        ErrorDialog(this, wxString::FromUTF8(e.what()), false).ShowModal();
++    } catch (...) {
++        ErrorDialog(this, _L("Could not copy the file. The app stayed open."), false).ShowModal();
+     }
+-    OnDownloadFinished(id, wxString::FromUTF8(dest.string()));
+ }
+ 
+ bool WebModelsPanel::PickFilamentsIfNeeded(const BambuToU1Converter::Result &first, std::vector<BambuToU1Converter::Pick> &picks)
+@@ -414,53 +465,77 @@ bool WebModelsPanel::PickFilamentsIfNeeded(const BambuToU1Converter::Result &fir
+ 
+ bool WebModelsPanel::ConvertPath(const std::string &src, std::string *out_converted)
+ {
+-    if (!BambuToU1Converter::is_bambu_project(src)) {
+-        WarningDialog(this,
+-                      _L("This file is not a Bambu/MakerWorld project 3MF. STL and Printables files should be imported as geometry."),
+-                      _L("Convert to U1"), wxOK)
++    try {
++        if (src.empty()) {
++            WarningDialog(this, _L("No file selected."), _L("Convert to U1"), wxOK).ShowModal();
++            return false;
++        }
++        boost::filesystem::path src_path(src);
++        if (!BambuToU1Converter::is_bambu_project(src_path)) {
++            WarningDialog(this,
++                          _L("This file is not a Bambu/MakerWorld project 3MF. STL and Printables files should be imported as geometry (Open in Prepare)."),
++                          _L("Convert to U1"), wxOK)
++                .ShowModal();
++            return false;
++        }
++        auto first = BambuToU1Converter::convert(src_path, models_converted_dir(true), {});
++        std::vector<BambuToU1Converter::Pick> picks;
++        if (first.need_filament_pick) {
++            if (!PickFilamentsIfNeeded(first, picks))
++                return false;
++            first = BambuToU1Converter::convert(src_path, models_converted_dir(true), picks);
++        }
++        if (!first.ok) {
++            ErrorDialog(this, from_u8(first.error.empty() ? "Conversion failed." : first.error), false).ShowModal();
++            return false;
++        }
++        if (out_converted)
++            *out_converted = first.output_path;
++        m_status->SetLabel(wxString::Format(_L("Converted to %s"), from_u8(first.output_path)));
++        InfoDialog(this, _L("Convert to U1"),
++                   wxString::Format(_L("Wrote %s\nColor painting is kept. Open it as a project so the machine stays U1.\n\nConverter logic: josuanbn/bl2u1 (GPL-3.0), ported in-process. JSON templates are used if the 3MF templates are not in resources/converter/."),
++                                    from_u8(first.output_path)))
++            .ShowModal();
++        return true;
++    } catch (const std::exception &e) {
++        BOOST_LOG_TRIVIAL(error) << "Models ConvertPath: " << e.what();
++        ErrorDialog(this, wxString::Format(_L("Convert to U1 failed: %s\nThe app stayed open."), from_u8(e.what())), false).ShowModal();
+         return false;
+-    }
+-    auto first = BambuToU1Converter::convert(src, models_converted_dir(true), {});
+-    std::vector<BambuToU1Converter::Pick> picks;
+-    if (first.need_filament_pick) {
+-        if (!PickFilamentsIfNeeded(first, picks))
+-            return false;
+-        first = BambuToU1Converter::convert(src, models_converted_dir(true), picks);
+-    }
+-    if (!first.ok) {
+-        ErrorDialog(this, wxString::FromUTF8(first.error), false).ShowModal();
++    } catch (...) {
++        BOOST_LOG_TRIVIAL(error) << "Models ConvertPath: unknown exception";
++        ErrorDialog(this, _L("Convert to U1 failed (unknown error). The app stayed open."), false).ShowModal();
+         return false;
+     }
+-    if (out_converted)
+-        *out_converted = first.output_path;
+-    m_status->SetLabel(wxString::Format(_L("Converted to %s"), wxString::FromUTF8(first.output_path)));
+-    InfoDialog(this, _L("Convert to U1"),
+-               wxString::Format(_L("Wrote %s\nColor painting is kept. Open it as a project so the machine stays U1.\n\nConverter logic: josuanbn/bl2u1 (GPL-3.0), ported in-process."),
+-                                wxString::FromUTF8(first.output_path)))
+-        .ShowModal();
+-    return true;
+ }
+ 
+ void WebModelsPanel::OnConvert()
+ {
+-    if (m_last_file.empty()) {
+-        convert_file_dialog();
+-        return;
++    try {
++        if (m_last_file.empty() || !boost::algorithm::iends_with(m_last_file, ".3mf")) {
++            convert_file_dialog();
++            return;
++        }
++        ConvertPath(m_last_file, &m_last_converted);
++        UpdateChrome();
++    } catch (...) {
++        ErrorDialog(this, _L("Convert to U1 failed unexpectedly. The app stayed open."), false).ShowModal();
+     }
+-    ConvertPath(m_last_file, &m_last_converted);
+-    UpdateChrome();
+ }
+ 
+ void WebModelsPanel::convert_file_dialog()
+ {
+-    wxFileDialog dlg(this, _L("Convert Bambu 3MF to Snapmaker U1"), wxEmptyString, wxEmptyString, "3MF (*.3mf)|*.3mf",
+-                     wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+-    if (dlg.ShowModal() != wxID_OK)
+-        return;
+-    m_last_file = into_u8(dlg.GetPath());
+-    ConvertPath(m_last_file, &m_last_converted);
+-    UpdateChrome();
++    try {
++        auto start = models_root_dir(false);
++        wxFileDialog dlg(this, _L("Convert Bambu 3MF to Snapmaker U1"), from_path(start), wxEmptyString, "3MF (*.3mf)|*.3mf",
++                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
++        if (dlg.ShowModal() != wxID_OK)
++            return;
++        m_last_file = into_u8(dlg.GetPath());
++        ConvertPath(m_last_file, &m_last_converted);
++        UpdateChrome();
++    } catch (...) {
++        ErrorDialog(this, _L("Convert to U1 failed unexpectedly. The app stayed open."), false).ShowModal();
++    }

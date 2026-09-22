@@ -1,0 +1,50 @@
+name: Apply M2 download + converter no-throw
+
+# One-shot: run .github/scripts/m2-surgical.py, commit, dispatch
+# windows-build.yml to tag m2-windows. Does not overwrite m1-windows.
+# trigger: liadev-report-2-20260922
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/m2-models-webview-59e1
+    paths:
+      - ".github/workflows/apply-m2-download-convert.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-and-dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/m2-models-webview-59e1
+
+      - name: Surgical patch converter + WebView2 + panel + MainFrame
+        run: |
+          python3 .github/scripts/m2-surgical.py
+          git add src/slic3r/Utils/BambuToU1Converter.cpp \
+                  src/slic3r/GUI/WebView2Host.cpp \
+                  src/slic3r/GUI/WebModelsPanel.cpp \
+                  src/slic3r/GUI/MainFrame.cpp
+          git config user.name "Liadev"
+          git config user.email "122531419+Liadev-op@users.noreply.github.com"
+          if git diff --cached --quiet; then
+            echo already applied
+          else
+            git commit -m "fix: Models download path and U1 converter no-throw"
+            git push origin HEAD:cursor/m2-models-webview-59e1
+          fi
+
+      - name: Dispatch Windows portable build (m2-windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-build.yml --ref cursor/m2-models-webview-59e1
+          sleep 10
+          gh run list --workflow=windows-build.yml --branch cursor/m2-models-webview-59e1 --limit 5
