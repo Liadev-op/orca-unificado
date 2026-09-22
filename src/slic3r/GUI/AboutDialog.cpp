@@ -88,6 +88,7 @@ void CopyrightsDialog::fill_entries()
         { "Admesh",                                         "",      "https://admesh.readthedocs.io/" },
         { "Anti-Grain Geometry",                            "",      "http://antigrain.com" },
         { "ArcWelderLib",                                   "",      "https://plugins.octoprint.org/plugins/arc_welder" },
+        { "bl2u1 (Bambu 3MF to Snapmaker U1)",               "GPL-3.0 (josuanbn)", "https://github.com/josuanbn/bl2u1" },
         { "Boost",                                          "",      "http://www.boost.org" },
         { "Cereal",                                         "",      "http://uscilab.github.io/cereal" },
         { "CGAL",                                           "",      "https://www.cgal.org" },
