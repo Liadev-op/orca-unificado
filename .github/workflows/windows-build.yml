@@ -19,3 +19,238 @@ on:
       - cursor/m1-orca-cloud-a90c
     paths:
       - ".github/workflows/windows-build.yml"
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  windows:
+    name: Deps + slicer (windows-2022)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    env:
+      ver: V2.4.0
+    steps:
+      - name: Enable git long paths
+        run: git config --system core.longpaths true
+
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          @(
+            "C:\\Program Files\\Android",
+            "C:\\Program Files (x86)\\Android",
+            "C:\\hostedtoolcache\\windows\\CodeQL",
+            "C:\\hostedtoolcache\\windows\\go",
+            "C:\\hostedtoolcache\\windows\\Java",
+            "C:\\hostedtoolcache\\windows\\Ruby"
+          ) | ForEach-Object { if (Test-Path $_) { Remove-Item -Recurse -Force $_ } }
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Git LFS pull
+        run: git lfs pull
+
+      - name: Version from version.inc
+        shell: pwsh
+        run: |
+          $date = Get-Date -Format "yyyyMMdd"
+          $ver = "V2.4.0"
+          $raw = Get-Content version.inc -Raw
+          if ($raw -match 'set\(Snapmaker_VERSION "(.*?)"\)') {
+            $ver = "V$($Matches[1])"
+          }
+          "ver=$ver" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          "date=$date" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          Write-Host "ver=$ver date=$date APP_KEY=OrcaUnificado"
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: CMake 3.28
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~3.28.0"
+
+      - name: Cache deps
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: deps/build/OrcaSlicer_dep
+          key: windows-2022-orcaunificado-deps-${{ hashFiles('deps/**') }}
+          save-always: true
+
+      - name: Verify cached OpenSSL
+        id: deps-ok
+        shell: pwsh
+        run: |
+          $ok = "false"
+          $root = "deps/build/OrcaSlicer_dep/usr/local"
+          if ((Test-Path "$root/lib/libcrypto.lib") -and (Test-Path "$root/lib/libssl.lib") -and (Test-Path "$root/include/openssl/opensslv.h")) {
+            $ok = "true"
+          }
+          "ok=$ok" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "cached deps ok=$ok cache-hit=${{ steps.cache-deps.outputs.cache-hit }}"
+
+      - name: Install Strawberry Perl
+        if: steps.deps-ok.outputs.ok != 'true'
+        run: |
+          choco install strawberryperl --no-progress -y
+          echo "C:\\Strawberry\\perl\\bin" >> $env:GITHUB_PATH
+
+      - name: Build deps
+        if: steps.deps-ok.outputs.ok != 'true'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          .\build_release_vs2022.bat deps
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Drop deps intermediate trees
+        if: steps.deps-ok.outputs.ok != 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem "deps/build" -Force | Where-Object { $_.Name -ne "OrcaSlicer_dep" } | Remove-Item -Recurse -Force
+          Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize
+
+      - name: Detect Windows SDK
+        shell: pwsh
+        run: |
+          $kits = "C:\\Program Files (x86)\\Windows Kits\\10"
+          $include = Join-Path $kits "Include"
+          Get-ChildItem $include | ForEach-Object { $_.Name }
+          $sdk = Get-ChildItem $include -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName "um\\windows.h") } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+          if (-not $sdk) { throw "Windows 10 SDK not found under $include" }
+          $sdkDir = $kits.TrimEnd('\\') + [char]92
+          $sdkVer = $sdk.Name.TrimEnd('\\') + [char]92
+          "WindowsSdkDir=$sdkDir" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          "WindowsSDKVersion=$sdkVer" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+          Write-Host "SDK $($sdk.Name)"
+
+      - name: Build slicer
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        env:
+          WindowsSdkDir: ${{ env.WindowsSdkDir }}
+          WindowsSDKVersion: ${{ env.WindowsSDKVersion }}
+        run: |
+          .\build_release_vs2022.bat slicer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Pack portable zip
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "build\\Snapmaker_Orca"
+          if (-not (Test-Path $prefix)) { throw "cmake install prefix missing: $prefix" }
+          $exe = Join-Path $prefix "snapmaker-orca.exe"
+          if (-not (Test-Path $exe)) {
+            Get-ChildItem $prefix -Recurse -Filter "*.exe" | Select-Object -First 30 FullName
+            throw "snapmaker-orca.exe not in install prefix"
+          }
+          $dest = Join-Path $env:GITHUB_WORKSPACE "build\\OrcaUnificado"
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Copy-Item -Recurse $prefix $dest
+          $dataDir = Join-Path $dest "data_dir"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          $nl = [Environment]::NewLine
+          $leemeData = @(
+            'Orca Unificado - carpeta portable (data_dir)',
+            '============================================',
+            '',
+            'Mecanismo nativo de Orca/SnOrca: si existe la carpeta data_dir junto',
+            'al exe, el slicer guarda aqui perfiles, cache, logs, presets de usuario',
+            '(user/<UUID>/) y el plugin Bambu opcional.',
+            '',
+            'No usa %APPDATA%\\OrcaUnificado, ni Snapmaker_Orca, ni OrcaSlicer.',
+            '',
+            'No borres esta carpeta. Si falta, la app cae a APPDATA.',
+            'Si vienes del zip anterior, copia aqui el contenido de',
+            '%APPDATA%\\OrcaUnificado para no repetir el wizard/login.',
+            '',
+            'Fallback: snapmaker-orca.exe --datadir D:\\ruta\\absoluta'
+          ) -join $nl
+          [System.IO.File]::WriteAllText((Join-Path $dataDir "LEEME.txt"), $leemeData + $nl, $utf8)
+          $leemeRoot = @(
+            'Orca Unificado (portable)',
+            '=========================',
+            '',
+            '1. Ejecuta snapmaker-orca.exe (nombre interno del binario SnOrca 2.4.0).',
+            '2. La configuracion se crea en la carpeta data_dir, junto a este archivo.',
+            '3. Copia esta carpeta entera a otro PC: perfiles y cuenta viajan con el zip.',
+            '',
+            'No pisa %APPDATA% de Snapmaker Orca ni de Orca Slicer.'
+          ) -join $nl
+          [System.IO.File]::WriteAllText((Join-Path $dest "LEEME.txt"), $leemeRoot + $nl, $utf8)
+          $zipName = "OrcaUnificado_Windows_$($env:ver)_portable.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "build\\$zipName"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          & "C:\\Program Files\\7-Zip\\7z.exe" a -tzip $zip $dest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item $zip | Format-List FullName, Length
+          & "C:\\Program Files\\7-Zip\\7z.exe" l $zip | Select-String -Pattern "data_dir|LEEME|snapmaker-orca.exe"
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrcaUnificado_Windows_${{ env.ver }}_portable
+          path: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: m1-windows
+          target_commitish: ${{ github.sha }}
+          name: Orca Unificado Windows (M1, portable data_dir)
+          prerelease: true
+          make_latest: false
+          files: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
+          body: |
+            Portable Windows de Orca Unificado (SLIC3R_APP_KEY=OrcaUnificado).
+            Self-contained: la config vive en `data_dir` junto al exe (mecanismo nativo Orca/SnOrca, PR SoftFever #6780).
+            No pisa %APPDATA%\Snapmaker_Orca ni %APPDATA%\OrcaSlicer ni %APPDATA%\OrcaUnificado.
+
+            1. Descarga el zip.
+            2. Extrae la carpeta OrcaUnificado.
+            3. Ejecuta snapmaker-orca.exe.
+            4. Tras el primer arranque verás `OrcaUnificado\data_dir\` (user, cache, log, OrcaUnificado.conf, etc.).
+
+            Si usaste el zip anterior, copia el contenido de `%APPDATA%\OrcaUnificado` a `data_dir` para no repetir el wizard.
+
+            Fallback: `snapmaker-orca.exe --datadir "D:\\ruta"`.
+            Sin firma Authenticode: SmartScreen puede avisar. NSIS no va en este corte (el CPACK de SnOrca pisaría el instalador oficial Snapmaker).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = @(
+            "## Orca Unificado Windows",
+            "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "- SHA: ${{ github.sha }}",
+            "- ver: $($env:ver)",
+            "- deps cache: ${{ steps.cache-deps.outputs.cache-hit }}",
+            "- deps ok: ${{ steps.deps-ok.outputs.ok }}",
+            "- datadir: data_dir junto al exe (no APPDATA)",
+            "- Release: https://github.com/${{ github.repository }}/releases/tag/m1-windows"
+          )
+          $lines -join [Environment]::NewLine | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
