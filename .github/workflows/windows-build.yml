@@ -206,7 +206,7 @@ jobs:
           & "C:\\Program Files\\7-Zip\\7z.exe" l $zip | Select-String -Pattern "data_dir|LEEME|snapmaker-orca.exe"
 
       - name: Upload Actions artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: OrcaUnificado_Windows_${{ env.ver }}_portable
           path: ${{ github.workspace }}/build/OrcaUnificado_Windows_${{ env.ver }}_portable.zip
