@@ -214,7 +214,7 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub prerelease
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: m1-windows
           target_commitish: ${{ github.sha }}
