@@ -76,7 +76,7 @@ jobs:
           Write-Host "ver=$ver date=$date APP_KEY=OrcaUnificado"
 
       - name: Setup MSVC
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: CMake 3.28
         uses: lukka/get-cmake@latest
